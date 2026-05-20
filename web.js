@@ -1,15 +1,15 @@
 require('dotenv').config();
 const express = require('express');
 const {
-  makeWASocket,
+  default: makeWASocket,
   useMultiFileAuthState,
   DisconnectReason,
   fetchLatestBaileysVersion,
+  makeCacheableSignalKeyStore,
   Browsers
 } = require('@whiskeysockets/baileys');
 const path = require('path');
 const fs   = require('fs');
-const { Boom } = require('@hapi/boom');
 const pino = require('pino');
 
 const app  = express();
@@ -37,7 +37,7 @@ function saveBots(bots) { fs.writeFileSync(BOTS_FILE, JSON.stringify(bots, null,
 const botInstances = new Map(); // id → { sock, status, messages, startTime, registered }
 const pairingStore = new Map(); // id → { code, expiresAt }
 
-// ── Core: create a fresh socket and get pairing code ──────────────────────────
+// ── Core: start a bot (mirrors original index.js exactly) ────────────────────
 async function startBot(botId) {
   const bots      = loadBots();
   const botConfig = bots[botId];
@@ -48,16 +48,24 @@ async function startBot(botId) {
 
   const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
   const { version }          = await fetchLatestBaileysVersion();
+  const logger               = pino({ level: 'silent' });
 
+  // ── Exact same config as the original index.js ────────────────────────────
   const sock = makeWASocket({
     version,
-    auth:              state,
-    printQRInTerminal: false,
-    logger:            pino({ level: 'silent' }),
-    browser:           Browsers.ubuntu('Desktop'),
-    mobile:            false,
-    syncFullHistory:   false,
-    markOnlineOnConnect: false
+    logger,
+    auth: {
+      creds: state.creds,
+      keys:  makeCacheableSignalKeyStore(state.keys, logger)  // ← was missing, causes pairing failure
+    },
+    browser:                  Browsers.ubuntu('Chrome'),
+    printQRInTerminal:        false,
+    generateHighQualityLinkPreview: true,
+    defaultQueryTimeoutMs:    60000,
+    connectTimeoutMs:         60000,
+    keepAliveIntervalMs:      10000,
+    retryRequestDelayMs:      250,
+    getMessage:               async () => ({ conversation: '' })
   });
 
   botInstances.set(botId, {
@@ -68,27 +76,8 @@ async function startBot(botId) {
     registered: state.creds.registered
   });
 
-  // ─── CRITICAL: call requestPairingCode RIGHT HERE, no delay ───────────────
-  // Baileys internally queues this until the WS handshake completes.
-  // Calling it AFTER a delay or inside connection.update is too late.
-  if (!state.creds.registered) {
-    const phone = botConfig.phone.replace(/\D/g, ''); // digits only, no +
-    console.log(`[${botConfig.name}] Requesting pairing code for ${phone}…`);
-    try {
-      const code = await sock.requestPairingCode(phone);
-      pairingStore.set(botId, { code, expiresAt: Date.now() + 5 * 60 * 1000 });
-      console.log(`[${botConfig.name}] ✓ Pairing code: ${code}`);
-      const inst = botInstances.get(botId);
-      if (inst) inst.needsCode = false;
-    } catch (err) {
-      console.error(`[${botConfig.name}] ✗ Pairing code error: ${err.message}`);
-      const inst = botInstances.get(botId);
-      if (inst) inst.needsCode = true;
-    }
-  }
-
-  // ─── Event handlers AFTER pairing code request ───────────────────────────
-  sock.ev.on('creds.update', saveCreds);
+  let credsSaved = false;
+  sock.ev.on('creds.update', () => { credsSaved = true; saveCreds(); });
 
   sock.ev.on('connection.update', async update => {
     const { connection, lastDisconnect } = update;
@@ -96,23 +85,31 @@ async function startBot(botId) {
     if (!inst) return;
 
     if (connection === 'close') {
-      const statusCode      = new Boom(lastDisconnect?.error)?.output?.statusCode;
-      const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-      inst.status = shouldReconnect ? 'reconnecting' : 'disconnected';
+      const statusCode      = lastDisconnect?.error?.output?.statusCode;
+      const loggedOut       = statusCode === DisconnectReason.loggedOut;
+      const hadCreds        = inst.registered;
 
-      if (shouldReconnect) {
-        console.log(`[${botConfig.name}] Reconnecting in 5 s…`);
-        setTimeout(() => startBot(botId).catch(e => console.error(e.message)), 5000);
+      if (loggedOut) {
+        console.log(`[${botConfig.name}] Logged out — clearing session`);
+        inst.status = 'disconnected';
+        // Clear session so next start asks for pairing again
+        fs.rmSync(sessionDir, { recursive: true, force: true });
+      } else if (!hadCreds && !credsSaved) {
+        // Pairing attempt failed — don't reconnect spam
+        console.log(`[${botConfig.name}] Pairing connection closed (no creds saved)`);
+        inst.status = 'disconnected';
       } else {
-        console.log(`[${botConfig.name}] Logged out.`);
+        inst.status = 'reconnecting';
+        const delay = 5000;
+        console.log(`[${botConfig.name}] Reconnecting in ${delay / 1000}s…`);
+        setTimeout(() => startBot(botId).catch(e => console.error(e.message)), delay);
       }
     } else if (connection === 'open') {
       inst.status     = 'connected';
       inst.startTime  = Date.now();
       inst.registered = true;
-      inst.needsCode  = false;
       pairingStore.delete(botId);
-      console.log(`[${botConfig.name}] ✓ Connected!`);
+      console.log(`[${botConfig.name}] ✓ Connected as ${sock.user?.id}`);
 
       const fresh = loadBots()[botId];
       if (fresh?.avatarPath) {
@@ -130,10 +127,39 @@ async function startBot(botId) {
     if (inst) inst.messages += msgs.filter(m => !m.key.fromMe).length;
   });
 
-  return sock;
+  // ── Request pairing code (mirrors original tryPair with retries) ──────────
+  if (!state.creds.registered) {
+    await new Promise(r => setTimeout(r, 1500)); // let WS handshake settle — exact same delay as original
+
+    const phone = botConfig.phone.replace(/\D/g, '');
+    console.log(`[${botConfig.name}] Requesting pairing code for +${phone}…`);
+
+    const tryPair = async (attemptsLeft) => {
+      try {
+        const raw  = await sock.requestPairingCode(phone);
+        const code = raw.match(/.{1,4}/g).join('-'); // format as XXXX-XXXX
+        pairingStore.set(botId, { code, expiresAt: Date.now() + 5 * 60 * 1000 });
+        const inst = botInstances.get(botId);
+        if (inst) inst.needsCode = false;
+        console.log(`[${botConfig.name}] ✓ Pairing code: ${code}`);
+      } catch (err) {
+        console.error(`[${botConfig.name}] Pairing attempt failed: ${err.message}`);
+        if (attemptsLeft > 0) {
+          console.log(`[${botConfig.name}] Retrying in 3s… (${attemptsLeft} left)`);
+          await new Promise(r => setTimeout(r, 3000));
+          return tryPair(attemptsLeft - 1);
+        }
+        const inst = botInstances.get(botId);
+        if (inst) inst.needsCode = true;
+        console.error(`[${botConfig.name}] Could not get pairing code after all attempts`);
+      }
+    };
+
+    await tryPair(4); // 4 retries — same as original
+  }
 }
 
-// ─── Helper: cleanly kill a bot's socket ─────────────────────────────────────
+// ── Kill a bot socket cleanly ─────────────────────────────────────────────────
 function killBot(botId) {
   const inst = botInstances.get(botId);
   if (inst?.sock) { try { inst.sock.end(new Error('killed')); } catch {} }
@@ -143,10 +169,9 @@ function killBot(botId) {
 
 // ── REST API ──────────────────────────────────────────────────────────────────
 
-// GET /api/bots
 app.get('/api/bots', (_req, res) => {
   const bots = loadBots();
-  const list = Object.entries(bots).map(([id, bot]) => {
+  res.json(Object.entries(bots).map(([id, bot]) => {
     const inst    = botInstances.get(id);
     const pairing = pairingStore.get(id);
     return {
@@ -161,18 +186,16 @@ app.get('/api/bots', (_req, res) => {
       pairingCode: pairing && pairing.expiresAt > Date.now() ? pairing.code : null,
       needsCode:   !!(inst?.needsCode)
     };
-  });
-  res.json(list);
+  }));
 });
 
-// POST /api/bots — add new bot
 app.post('/api/bots', async (req, res) => {
   try {
     const { phone, name, avatar } = req.body;
     if (!phone || !name) return res.status(400).json({ error: 'phone and name are required' });
 
     const rawPhone = phone.replace(/\D/g, '');
-    if (rawPhone.length < 10) return res.status(400).json({ error: 'Phone number too short' });
+    if (rawPhone.length < 10) return res.status(400).json({ error: 'Phone number too short — include country code' });
 
     const id   = 'bot_' + Date.now();
     const bots = loadBots();
@@ -191,8 +214,7 @@ app.post('/api/bots', async (req, res) => {
     bots[id] = { name: name.trim(), phone: rawPhone, avatarPath, createdAt: new Date().toISOString() };
     saveBots(bots);
 
-    // startBot awaits requestPairingCode internally — code is ready when it returns
-    await startBot(id);
+    await startBot(id); // waits for pairing code (up to 4 retries internally)
 
     const inst    = botInstances.get(id);
     const pairing = pairingStore.get(id);
@@ -210,28 +232,23 @@ app.post('/api/bots', async (req, res) => {
   }
 });
 
-// POST /api/bots/:id/request-code — fresh socket + immediate code request
+// Fresh socket + new pairing code request
 app.post('/api/bots/:id/request-code', async (req, res) => {
   const { id } = req.params;
   const bots   = loadBots();
   if (!bots[id]) return res.status(404).json({ error: 'Bot not found' });
 
-  // Kill existing socket
   killBot(id);
 
-  // Clear any stale session files so Baileys treats it as a fresh registration
+  // Clear session so Baileys treats it as a completely fresh registration
   const sessionDir = path.join(SESSIONS_DIR, id);
-  if (fs.existsSync(sessionDir)) fs.rmSync(sessionDir, { recursive: true });
+  if (fs.existsSync(sessionDir)) fs.rmSync(sessionDir, { recursive: true, force: true });
 
   try {
     await startBot(id);
     const pairing = pairingStore.get(id);
     if (!pairing) {
-      const inst = botInstances.get(id);
-      const hint = inst?.needsCode
-        ? 'Baileys could not generate a code. Check that the phone number is correct and includes the country code (no +).'
-        : 'Pairing code not received yet — please try again.';
-      return res.status(500).json({ error: hint });
+      return res.status(500).json({ error: 'Could not generate pairing code — check that the phone number is correct and includes the country code (no +).' });
     }
     res.json({ code: pairing.code });
   } catch (err) {
@@ -240,7 +257,6 @@ app.post('/api/bots/:id/request-code', async (req, res) => {
   }
 });
 
-// DELETE /api/bots/:id
 app.delete('/api/bots/:id', (req, res) => {
   const { id } = req.params;
   killBot(id);
@@ -252,11 +268,10 @@ app.delete('/api/bots/:id', (req, res) => {
   delete bots[id];
   saveBots(bots);
   const sd = path.join(SESSIONS_DIR, id);
-  if (fs.existsSync(sd)) fs.rmSync(sd, { recursive: true });
+  if (fs.existsSync(sd)) fs.rmSync(sd, { recursive: true, force: true });
   res.json({ success: true });
 });
 
-// POST /api/bots/:id/restart
 app.post('/api/bots/:id/restart', async (req, res) => {
   const { id } = req.params;
   const bots   = loadBots();
@@ -272,10 +287,9 @@ app.post('/api/bots/:id/restart', async (req, res) => {
   }
 });
 
-// SPA fallback
 app.get('*', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
-// ── Start ──────────────────────────────────────────────────────────────────────
+// ── Boot ──────────────────────────────────────────────────────────────────────
 app.listen(PORT, () => console.log(`\n🌊  Aqua Bot Manager → http://localhost:${PORT}\n`));
 
 (async () => {
