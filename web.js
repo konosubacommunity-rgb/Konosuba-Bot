@@ -1,4 +1,9 @@
 require('dotenv').config();
+
+// ── Keep the process alive even if a bot crashes ──────────────────────────────
+process.on('uncaughtException',       err => console.error('uncaughtException:', err.message));
+process.on('unhandledRejection', (reason) => console.error('unhandledRejection:', reason));
+
 const express = require('express');
 const cors    = require('cors');
 const {
@@ -100,8 +105,18 @@ async function startBot(botId) {
   fs.mkdirSync(sessionDir, { recursive: true });
 
   const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
-  const { version }          = await fetchLatestBaileysVersion();
-  const logger               = pino({ level: 'silent' });
+
+  // Fetch latest WA version — fall back to a known-good version if the
+  // network request fails (common on Render cold starts).
+  let version = [2, 3000, 1015901307];
+  try {
+    const result = await fetchLatestBaileysVersion();
+    version = result.version;
+  } catch (e) {
+    console.warn(`[${botConfig.name}] Could not fetch latest WA version, using fallback`);
+  }
+
+  const logger = pino({ level: 'silent' });
 
   const sock = makeWASocket({
     version,
@@ -112,11 +127,11 @@ async function startBot(botId) {
     },
     browser:                        Browsers.ubuntu('Chrome'),
     printQRInTerminal:              false,
-    generateHighQualityLinkPreview: true,
+    generateHighQualityLinkPreview: false,  // saves memory on free tier
     defaultQueryTimeoutMs:          60000,
     connectTimeoutMs:               60000,
-    keepAliveIntervalMs:            10000,
-    retryRequestDelayMs:            250,
+    keepAliveIntervalMs:            25000,
+    retryRequestDelayMs:            500,
     getMessage:                     async () => ({ conversation: '' })
   });
 
@@ -145,15 +160,25 @@ async function startBot(botId) {
       if (loggedOut) {
         console.log(`[${botConfig.name}] Logged out — clearing session`);
         inst.status = 'disconnected';
+        pairingStore.delete(botId);
         fs.rmSync(sessionDir, { recursive: true, force: true });
       } else if (!hadCreds && !credsSaved) {
-        console.log(`[${botConfig.name}] Pairing connection closed (no creds saved)`);
-        inst.status = 'disconnected';
+        // No creds at all — but if we have a valid pairing code the user
+        // might still enter it, so keep the socket alive by reconnecting.
+        const pending = pairingStore.get(botId);
+        if (pending && pending.expiresAt > Date.now()) {
+          console.log(`[${botConfig.name}] Socket closed while pairing code pending — reconnecting to keep listening…`);
+          inst.status = 'connecting';
+          setTimeout(() => startBot(botId).catch(e => console.error(e.message)), 5000);
+        } else {
+          console.log(`[${botConfig.name}] Pairing connection closed (no creds saved)`);
+          inst.status = 'disconnected';
+        }
       } else {
+        // Normal reconnect after established session disconnect
         inst.status = 'reconnecting';
-        const delay = 5000;
-        console.log(`[${botConfig.name}] Reconnecting in ${delay / 1000}s…`);
-        setTimeout(() => startBot(botId).catch(e => console.error(e.message)), delay);
+        console.log(`[${botConfig.name}] Reconnecting in 5s…`);
+        setTimeout(() => startBot(botId).catch(e => console.error(e.message)), 5000);
       }
     } else if (connection === 'open') {
       inst.status     = 'connected';
@@ -325,33 +350,47 @@ async function startBot(botId) {
 
   // ── Request pairing code ──────────────────────────────────────────────────
   if (!state.creds.registered) {
-    await new Promise(r => setTimeout(r, 1500));
+    // If we already issued a valid code (from a previous socket that closed
+    // while waiting for the user to scan), do NOT request another one.
+    // Just reconnect silently and wait for the user to enter the code.
+    const existing = pairingStore.get(botId);
+    const hasValidCode = existing && existing.expiresAt > Date.now();
 
-    const phone = botConfig.phone.replace(/\D/g, '');
-    console.log(`[${botConfig.name}] Requesting pairing code for +${phone}…`);
+    if (hasValidCode) {
+      console.log(`[${botConfig.name}] Reconnected — waiting for pairing code to be entered (${existing.code})`);
+    } else {
+      // Run pairing in background so the HTTP response isn't held up
+      (async () => {
+        // Give the socket time to stabilise before requesting the code
+        await new Promise(r => setTimeout(r, 4000));
 
-    const tryPair = async (attemptsLeft) => {
-      try {
-        const raw  = await sock.requestPairingCode(phone);
-        const code = raw.match(/.{1,4}/g).join('-');
-        pairingStore.set(botId, { code, expiresAt: Date.now() + 5 * 60 * 1000 });
-        const inst = botInstances.get(botId);
-        if (inst) inst.needsCode = false;
-        console.log(`[${botConfig.name}] ✓ Pairing code: ${code}`);
-      } catch (err) {
-        console.error(`[${botConfig.name}] Pairing attempt failed: ${err.message}`);
-        if (attemptsLeft > 0) {
-          console.log(`[${botConfig.name}] Retrying in 3s… (${attemptsLeft} left)`);
-          await new Promise(r => setTimeout(r, 3000));
-          return tryPair(attemptsLeft - 1);
-        }
-        const inst = botInstances.get(botId);
-        if (inst) inst.needsCode = true;
-        console.error(`[${botConfig.name}] Could not get pairing code after all attempts`);
-      }
-    };
+        const phone = botConfig.phone.replace(/\D/g, '');
+        console.log(`[${botConfig.name}] Requesting pairing code for +${phone}…`);
 
-    await tryPair(4);
+        const tryPair = async (attemptsLeft) => {
+          try {
+            const raw  = await sock.requestPairingCode(phone);
+            const code = raw.match(/.{1,4}/g).join('-');
+            pairingStore.set(botId, { code, expiresAt: Date.now() + 10 * 60 * 1000 });
+            const inst = botInstances.get(botId);
+            if (inst) inst.needsCode = false;
+            console.log(`[${botConfig.name}] ✓ Pairing code: ${code}`);
+          } catch (err) {
+            console.error(`[${botConfig.name}] Pairing attempt failed: ${err.message}`);
+            if (attemptsLeft > 0) {
+              console.log(`[${botConfig.name}] Retrying in 5s… (${attemptsLeft} left)`);
+              await new Promise(r => setTimeout(r, 5000));
+              return tryPair(attemptsLeft - 1);
+            }
+            const inst = botInstances.get(botId);
+            if (inst) inst.needsCode = true;
+            console.error(`[${botConfig.name}] Could not get pairing code after all attempts`);
+          }
+        };
+
+        await tryPair(3);
+      })().catch(e => console.error(`[${botConfig.name}] Pairing background error:`, e.message));
+    }
   }
 }
 
