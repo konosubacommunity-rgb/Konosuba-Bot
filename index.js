@@ -45,13 +45,15 @@ const rl = readline.createInterface({ input: process.stdin, output: process.stdo
 const question = (q) => new Promise((res) => rl.question(q, res));
 
 // Initialize Express API
-const app = express();
 app.use(cors({
   origin: [
-    'https://your-website.vercel.app',
-    'http://localhost:3000'
+    'https://konosubaweb.vercel.app/',
+    'http://localhost:3000',
+    'http://localhost:5000'
   ],
-  credentials: true
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  headers: ['Content-Type', 'Authorization']
 }));
 app.use(express.json());
 app.use('/api', websiteSyncRoutes);
