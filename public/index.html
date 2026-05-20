@@ -1,0 +1,765 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Aqua Bot Manager</title>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
+<link href="https://cdn.jsdelivr.net/npm/remixicon@4.2.0/fonts/remixicon.css" rel="stylesheet"/>
+<style>
+/* ── Reset & Base ─────────────────────────────────────────────────────────── */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --ff:'Poppins',sans-serif;
+  --radius-sm:10px;--radius-md:16px;--radius-lg:24px;--radius-xl:32px;
+  --green:#25D366;--green-d:#1db954;--green-glow:rgba(37,211,102,.25);
+  --yellow:#f5a623;--red:#ff4d4d;--blue:#4a9eff;
+  --trans:.22s cubic-bezier(.4,0,.2,1);
+}
+[data-theme="dark"]{
+  --bg:#0c0c0e;--surface:#141417;--card:#1b1b1f;--card-hover:#212127;
+  --border:rgba(255,255,255,.07);--border-s:rgba(255,255,255,.12);
+  --text:#f0f0f5;--text-2:#a0a0b0;--text-3:#5c5c70;
+  --shadow:0 8px 32px rgba(0,0,0,.5);
+  --glow:0 0 0 1px rgba(37,211,102,.3),0 0 20px rgba(37,211,102,.12);
+}
+[data-theme="light"]{
+  --bg:#f0f2f7;--surface:#e4e7f0;--card:#fff;--card-hover:#f8f9ff;
+  --border:rgba(0,0,0,.07);--border-s:rgba(0,0,0,.12);
+  --text:#111118;--text-2:#5a5a72;--text-3:#a0a0b8;
+  --shadow:0 4px 24px rgba(0,0,0,.08);
+  --glow:0 0 0 1px rgba(37,211,102,.3),0 0 16px rgba(37,211,102,.1);
+}
+html{scroll-behavior:smooth}
+body{
+  font-family:var(--ff);background:var(--bg);color:var(--text);
+  min-height:100vh;transition:background var(--trans),color var(--trans);
+  line-height:1.5;-webkit-font-smoothing:antialiased;
+}
+/* ── Scrollbar ────────────────────────────────────────────────────────────── */
+::-webkit-scrollbar{width:5px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--border-s);border-radius:99px}
+/* ── Layout ───────────────────────────────────────────────────────────────── */
+.app{max-width:1280px;margin:0 auto;padding:0 20px 60px}
+/* ── Header ───────────────────────────────────────────────────────────────── */
+header{
+  position:sticky;top:0;z-index:100;
+  background:var(--bg);border-bottom:1px solid var(--border);
+  backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+  padding:16px 20px;
+}
+.header-inner{
+  max-width:1280px;margin:0 auto;
+  display:flex;align-items:center;justify-content:space-between;gap:16px;
+}
+.brand{display:flex;align-items:center;gap:12px;text-decoration:none;color:inherit}
+.brand-icon{
+  width:40px;height:40px;border-radius:12px;
+  background:linear-gradient(135deg,var(--green),var(--green-d));
+  display:grid;place-items:center;font-size:20px;
+  box-shadow:0 2px 12px var(--green-glow);flex-shrink:0;
+}
+.brand-name{font-size:1.15rem;font-weight:700;letter-spacing:-.01em}
+.brand-sub{font-size:.72rem;color:var(--text-2);font-weight:400;display:block;margin-top:-2px}
+.header-right{display:flex;align-items:center;gap:10px}
+.badge-count{
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:99px;padding:5px 14px;font-size:.78rem;font-weight:500;
+  color:var(--text-2);display:flex;align-items:center;gap:6px;
+}
+.badge-count .dot{width:7px;height:7px;border-radius:50%;background:var(--green);
+  box-shadow:0 0 6px var(--green);animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.btn{
+  display:inline-flex;align-items:center;gap:7px;
+  padding:9px 18px;border-radius:99px;font-family:var(--ff);
+  font-size:.83rem;font-weight:600;cursor:pointer;border:none;
+  transition:all var(--trans);white-space:nowrap;
+}
+.btn-primary{
+  background:linear-gradient(135deg,var(--green),var(--green-d));
+  color:#fff;box-shadow:0 4px 16px var(--green-glow);
+}
+.btn-primary:hover{transform:translateY(-1px);box-shadow:0 6px 22px var(--green-glow)}
+.btn-primary:active{transform:translateY(0)}
+.btn-ghost{
+  background:var(--surface);border:1px solid var(--border);
+  color:var(--text);
+}
+.btn-ghost:hover{background:var(--card-hover);border-color:var(--border-s)}
+.btn-danger{background:rgba(255,77,77,.12);color:var(--red);border:1px solid rgba(255,77,77,.2)}
+.btn-danger:hover{background:rgba(255,77,77,.2)}
+.btn-sm{padding:6px 13px;font-size:.76rem}
+.btn-icon{
+  width:38px;height:38px;padding:0;border-radius:12px;
+  background:var(--surface);border:1px solid var(--border);
+  color:var(--text-2);font-size:17px;display:grid;place-items:center;
+  cursor:pointer;transition:all var(--trans);
+}
+.btn-icon:hover{background:var(--card-hover);color:var(--text);border-color:var(--border-s)}
+/* ── Stats Bar ────────────────────────────────────────────────────────────── */
+.stats-bar{
+  display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+  padding:20px 0 0;
+}
+.stat-pill{
+  display:flex;align-items:center;gap:8px;
+  background:var(--card);border:1px solid var(--border);
+  border-radius:99px;padding:8px 16px;font-size:.8rem;font-weight:500;
+  color:var(--text-2);
+}
+.stat-pill .icon{font-size:14px}
+.stat-pill strong{color:var(--text);font-weight:600}
+/* ── Grid ─────────────────────────────────────────────────────────────────── */
+.bots-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(300px,1fr));
+  gap:18px;padding-top:24px;
+}
+/* ── Bot Card ─────────────────────────────────────────────────────────────── */
+.bot-card{
+  background:var(--card);border:1px solid var(--border);
+  border-radius:var(--radius-lg);padding:24px;
+  transition:all var(--trans);position:relative;overflow:hidden;
+  display:flex;flex-direction:column;gap:16px;
+}
+.bot-card:hover{
+  border-color:var(--border-s);
+  box-shadow:var(--shadow);transform:translateY(-2px);
+}
+.bot-card.connected{border-color:rgba(37,211,102,.2)}
+.bot-card.connecting,
+.bot-card.reconnecting{border-color:rgba(245,166,35,.2)}
+.bot-card.disconnected,.bot-card.offline{border-color:rgba(255,77,77,.15)}
+.bot-card::before{
+  content:'';position:absolute;top:0;left:0;right:0;height:2px;
+  background:transparent;transition:background var(--trans);
+}
+.bot-card.connected::before{background:linear-gradient(90deg,var(--green),transparent)}
+.bot-card.connecting::before,
+.bot-card.reconnecting::before{background:linear-gradient(90deg,var(--yellow),transparent)}
+.bot-card.disconnected::before,
+.bot-card.offline::before{background:linear-gradient(90deg,var(--red),transparent)}
+
+.card-top{display:flex;align-items:center;gap:14px}
+.bot-avatar{
+  width:56px;height:56px;border-radius:var(--radius-md);
+  object-fit:cover;background:var(--surface);
+  flex-shrink:0;border:2px solid var(--border);
+}
+.bot-avatar-placeholder{
+  width:56px;height:56px;border-radius:var(--radius-md);
+  background:linear-gradient(135deg,#1e3a2f,#163225);
+  display:grid;place-items:center;font-size:24px;flex-shrink:0;
+  border:2px solid var(--border);color:var(--green);
+}
+.bot-info{flex:1;min-width:0}
+.bot-name{font-size:1rem;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bot-phone{font-size:.78rem;color:var(--text-2);margin-top:1px}
+.status-badge{
+  display:inline-flex;align-items:center;gap:5px;
+  border-radius:99px;padding:3px 10px;font-size:.72rem;font-weight:600;
+  margin-top:5px;
+}
+.status-badge .dot{width:6px;height:6px;border-radius:50%}
+.status-badge.connected{background:rgba(37,211,102,.12);color:var(--green)}
+.status-badge.connected .dot{background:var(--green);box-shadow:0 0 5px var(--green);animation:pulse 2s infinite}
+.status-badge.connecting,.status-badge.reconnecting{background:rgba(245,166,35,.12);color:var(--yellow)}
+.status-badge.connecting .dot,.status-badge.reconnecting .dot{background:var(--yellow);animation:pulse 1.2s infinite}
+.status-badge.disconnected,.status-badge.offline{background:rgba(255,77,77,.1);color:var(--red)}
+.status-badge.disconnected .dot,.status-badge.offline .dot{background:var(--red)}
+
+/* ── Stats Row ────────────────────────────────────────────────────────────── */
+.card-stats{
+  display:grid;grid-template-columns:1fr 1fr;gap:10px;
+}
+.stat-block{
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--radius-sm);padding:11px 14px;
+}
+.stat-block .label{
+  font-size:.7rem;color:var(--text-3);font-weight:500;
+  text-transform:uppercase;letter-spacing:.04em;display:flex;align-items:center;gap:4px;
+}
+.stat-block .value{font-size:1rem;font-weight:700;color:var(--text);margin-top:3px}
+
+/* ── Pairing Code Block ───────────────────────────────────────────────────── */
+.pairing-block{
+  background:linear-gradient(135deg,rgba(37,211,102,.06),rgba(26,185,84,.06));
+  border:1px solid rgba(37,211,102,.2);
+  border-radius:var(--radius-md);padding:16px;
+  display:flex;flex-direction:column;gap:10px;
+  animation:fadeIn .4s ease;
+}
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.pairing-label{
+  font-size:.72rem;font-weight:600;color:var(--green);
+  text-transform:uppercase;letter-spacing:.06em;
+  display:flex;align-items:center;gap:6px;
+}
+.pairing-code{
+  font-size:1.6rem;font-weight:800;letter-spacing:.18em;
+  color:var(--text);font-variant-numeric:tabular-nums;
+  display:flex;align-items:center;gap:12px;
+}
+.copy-btn{
+  margin-left:auto;padding:5px 12px;border-radius:8px;font-size:.72rem;font-weight:600;
+  background:rgba(37,211,102,.15);color:var(--green);border:1px solid rgba(37,211,102,.25);
+  cursor:pointer;transition:all var(--trans);font-family:var(--ff);
+}
+.copy-btn:hover{background:rgba(37,211,102,.25)}
+.pairing-hint{font-size:.74rem;color:var(--text-2);line-height:1.5}
+.pairing-hint strong{color:var(--text)}
+
+/* ── Card Actions ─────────────────────────────────────────────────────────── */
+.card-actions{display:flex;gap:8px;margin-top:auto}
+.card-actions .btn{flex:1;justify-content:center}
+
+/* ── Empty State ──────────────────────────────────────────────────────────── */
+.empty-state{
+  grid-column:1/-1;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;gap:16px;padding:80px 20px;text-align:center;
+}
+.empty-icon{
+  width:80px;height:80px;border-radius:var(--radius-xl);
+  background:var(--card);border:1px solid var(--border);
+  display:grid;place-items:center;font-size:36px;color:var(--text-3);
+}
+.empty-state h3{font-size:1.15rem;font-weight:600;color:var(--text)}
+.empty-state p{font-size:.85rem;color:var(--text-2);max-width:320px;line-height:1.6}
+
+/* ── Modal Overlay ────────────────────────────────────────────────────────── */
+.modal-overlay{
+  position:fixed;inset:0;z-index:200;
+  background:rgba(0,0,0,.6);backdrop-filter:blur(6px);
+  display:grid;place-items:center;padding:20px;
+  opacity:0;pointer-events:none;transition:opacity .22s ease;
+}
+.modal-overlay.open{opacity:1;pointer-events:all}
+.modal{
+  background:var(--card);border:1px solid var(--border-s);
+  border-radius:var(--radius-xl);padding:32px;
+  width:100%;max-width:460px;max-height:90vh;overflow-y:auto;
+  transform:translateY(20px) scale(.97);transition:transform .25s cubic-bezier(.34,1.56,.64,1);
+  box-shadow:0 24px 80px rgba(0,0,0,.5);
+}
+.modal-overlay.open .modal{transform:none}
+.modal-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px}
+.modal-title{font-size:1.1rem;font-weight:700}
+.modal-close{
+  width:32px;height:32px;border-radius:10px;background:var(--surface);
+  border:1px solid var(--border);color:var(--text-2);cursor:pointer;
+  display:grid;place-items:center;font-size:16px;transition:all var(--trans);
+}
+.modal-close:hover{color:var(--text);background:var(--card-hover)}
+
+/* ── Form ─────────────────────────────────────────────────────────────────── */
+.form-group{display:flex;flex-direction:column;gap:6px;margin-bottom:18px}
+.form-label{font-size:.8rem;font-weight:600;color:var(--text-2)}
+.form-input{
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--radius-sm);padding:12px 14px;
+  font-family:var(--ff);font-size:.9rem;color:var(--text);
+  transition:border var(--trans);width:100%;outline:none;
+}
+.form-input:focus{border-color:var(--green);box-shadow:0 0 0 3px rgba(37,211,102,.12)}
+.form-input::placeholder{color:var(--text-3)}
+.form-hint{font-size:.74rem;color:var(--text-3)}
+
+/* ── Avatar Upload ────────────────────────────────────────────────────────── */
+.avatar-upload{
+  border:2px dashed var(--border-s);border-radius:var(--radius-md);
+  padding:28px 20px;text-align:center;cursor:pointer;
+  transition:all var(--trans);position:relative;overflow:hidden;
+}
+.avatar-upload:hover{border-color:var(--green);background:rgba(37,211,102,.04)}
+.avatar-upload.has-file{border-style:solid;border-color:rgba(37,211,102,.4);background:rgba(37,211,102,.05)}
+.avatar-upload input{display:none}
+.avatar-preview{
+  width:72px;height:72px;border-radius:var(--radius-md);
+  object-fit:cover;margin:0 auto 10px;display:block;
+  border:2px solid rgba(37,211,102,.3);
+}
+.avatar-upload-icon{font-size:28px;color:var(--text-3);margin-bottom:8px}
+.avatar-upload-text{font-size:.8rem;color:var(--text-2);font-weight:500}
+.avatar-upload-hint{font-size:.72rem;color:var(--text-3);margin-top:2px}
+
+/* ── Spinner ──────────────────────────────────────────────────────────────── */
+.spinner{
+  display:inline-block;width:16px;height:16px;border-radius:50%;
+  border:2px solid rgba(255,255,255,.25);border-top-color:#fff;
+  animation:spin .7s linear infinite;
+}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ── Toast ────────────────────────────────────────────────────────────────── */
+.toast-container{
+  position:fixed;bottom:24px;right:24px;z-index:9999;
+  display:flex;flex-direction:column;gap:8px;
+  pointer-events:none;
+}
+.toast{
+  background:var(--card);border:1px solid var(--border-s);
+  border-radius:var(--radius-md);padding:12px 18px;
+  font-size:.83rem;font-weight:500;color:var(--text);
+  display:flex;align-items:center;gap:10px;
+  box-shadow:var(--shadow);min-width:220px;max-width:340px;
+  animation:slideIn .3s ease;pointer-events:all;
+}
+.toast.success{border-color:rgba(37,211,102,.3);color:var(--green)}
+.toast.error{border-color:rgba(255,77,77,.3);color:var(--red)}
+@keyframes slideIn{from{opacity:0;transform:translateX(20px)}to{opacity:1;transform:none}}
+@keyframes slideOut{to{opacity:0;transform:translateX(20px)}}
+
+/* ── Delete Confirm ───────────────────────────────────────────────────────── */
+.confirm-card{
+  position:absolute;inset:0;border-radius:var(--radius-lg);
+  background:var(--card);display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:14px;
+  padding:24px;z-index:10;animation:fadeIn .2s ease;
+  border:1px solid rgba(255,77,77,.2);
+}
+.confirm-card p{text-align:center;font-size:.87rem;color:var(--text-2);line-height:1.55}
+.confirm-card strong{color:var(--text)}
+.confirm-actions{display:flex;gap:8px;width:100%}
+.confirm-actions .btn{flex:1;justify-content:center}
+
+/* ── Responsive ───────────────────────────────────────────────────────────── */
+@media(max-width:600px){
+  .app{padding:0 12px 60px}
+  header{padding:14px 12px}
+  .badge-count{display:none}
+  .bots-grid{grid-template-columns:1fr;gap:14px}
+  .modal{padding:24px 20px}
+  .toast-container{left:12px;right:12px}
+  .toast{min-width:0;width:100%}
+  .pairing-code{font-size:1.3rem}
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="header-inner">
+    <a class="brand" href="/">
+      <div class="brand-icon"><i class="ri-whatsapp-line"></i></div>
+      <div>
+        <span class="brand-name">Aqua Bot Manager</span>
+        <span class="brand-sub">KONOSUBA Community</span>
+      </div>
+    </a>
+    <div class="header-right">
+      <div class="badge-count" id="onlineCount">
+        <span class="dot"></span>
+        <span id="onlineText">0 online</span>
+      </div>
+      <button class="btn-icon" id="themeToggle" title="Toggle theme" onclick="toggleTheme()">
+        <i class="ri-moon-fill" id="themeIcon"></i>
+      </button>
+      <button class="btn btn-primary" onclick="openModal()">
+        <i class="ri-add-line"></i> Add Bot
+      </button>
+    </div>
+  </div>
+</header>
+
+<div class="app">
+  <!-- Stats pills -->
+  <div class="stats-bar" id="statsBar">
+    <div class="stat-pill"><i class="ri-robot-line icon"></i> Total: <strong id="totalCount">0</strong> bots</div>
+    <div class="stat-pill"><i class="ri-wifi-line icon"></i> Connected: <strong id="connectedCount">0</strong></div>
+    <div class="stat-pill"><i class="ri-loader-line icon"></i> Pairing: <strong id="pairingCount">0</strong></div>
+    <div class="stat-pill"><i class="ri-message-3-line icon"></i> Messages: <strong id="messagesCount">0</strong></div>
+  </div>
+
+  <!-- Bot grid -->
+  <div class="bots-grid" id="botsGrid">
+    <div class="empty-state" id="emptyState">
+      <div class="empty-icon"><i class="ri-robot-2-line"></i></div>
+      <h3>No bots yet</h3>
+      <p>Add your first WhatsApp bot by clicking <strong>Add Bot</strong> and entering the phone number.</p>
+      <button class="btn btn-primary" onclick="openModal()">
+        <i class="ri-add-line"></i> Add Your First Bot
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Add Bot Modal -->
+<div class="modal-overlay" id="modalOverlay" onclick="closeModalOutside(event)">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 class="modal-title"><i class="ri-robot-line" style="color:var(--green)"></i> Deploy New Bot</h2>
+      <button class="modal-close" onclick="closeModal()"><i class="ri-close-line"></i></button>
+    </div>
+
+    <!-- Avatar upload -->
+    <div class="form-group">
+      <label class="form-label">Bot Profile Picture</label>
+      <div class="avatar-upload" id="avatarUpload" onclick="document.getElementById('avatarInput').click()">
+        <input type="file" id="avatarInput" accept="image/*" onchange="handleAvatarChange(this)"/>
+        <img id="avatarPreview" class="avatar-preview" style="display:none"/>
+        <div id="avatarPlaceholder">
+          <div class="avatar-upload-icon"><i class="ri-image-add-line"></i></div>
+          <div class="avatar-upload-text">Click to upload photo</div>
+          <div class="avatar-upload-hint">PNG, JPG, WEBP · Max 5 MB</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bot name -->
+    <div class="form-group">
+      <label class="form-label" for="botName">Bot Display Name</label>
+      <input class="form-input" id="botName" type="text" placeholder="e.g. Aqua, Megumin, Darkness…" maxlength="25"/>
+      <span class="form-hint">This will be set as the WhatsApp profile name.</span>
+    </div>
+
+    <!-- Phone number -->
+    <div class="form-group">
+      <label class="form-label" for="botPhone">WhatsApp Phone Number</label>
+      <input class="form-input" id="botPhone" type="tel" placeholder="628xxxxxxxxxx (with country code, no +)"/>
+      <span class="form-hint">Include country code, no spaces or dashes.</span>
+    </div>
+
+    <button class="btn btn-primary" id="deployBtn" onclick="deployBot()" style="width:100%;justify-content:center;padding:13px">
+      <i class="ri-rocket-line"></i> Deploy Bot & Get Pairing Code
+    </button>
+  </div>
+</div>
+
+<!-- Toast container -->
+<div class="toast-container" id="toastContainer"></div>
+
+<script>
+// ── State ──────────────────────────────────────────────────────────────────
+let bots = [];
+let pollInterval = null;
+let avatarBase64 = null;
+
+// ── Theme ──────────────────────────────────────────────────────────────────
+function toggleTheme() {
+  const html = document.documentElement;
+  const isDark = html.getAttribute('data-theme') === 'dark';
+  html.setAttribute('data-theme', isDark ? 'light' : 'dark');
+  document.getElementById('themeIcon').className = isDark ? 'ri-sun-fill' : 'ri-moon-fill';
+  localStorage.setItem('theme', isDark ? 'light' : 'dark');
+}
+
+(function initTheme() {
+  const saved = localStorage.getItem('theme') || 'dark';
+  document.documentElement.setAttribute('data-theme', saved);
+  document.getElementById('themeIcon').className = saved === 'dark' ? 'ri-moon-fill' : 'ri-sun-fill';
+})();
+
+// ── Modal ──────────────────────────────────────────────────────────────────
+function openModal() {
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('botName').focus();
+}
+function closeModal() {
+  document.getElementById('modalOverlay').classList.remove('open');
+}
+function closeModalOutside(e) {
+  if (e.target === document.getElementById('modalOverlay')) closeModal();
+}
+
+// ── Avatar Upload ──────────────────────────────────────────────────────────
+function handleAvatarChange(input) {
+  const file = input.files[0];
+  if (!file) return;
+  if (file.size > 5 * 1024 * 1024) { toast('Image too large (max 5 MB)', 'error'); return; }
+  const reader = new FileReader();
+  reader.onload = e => {
+    avatarBase64 = e.target.result;
+    const preview = document.getElementById('avatarPreview');
+    preview.src = avatarBase64;
+    preview.style.display = 'block';
+    document.getElementById('avatarPlaceholder').style.display = 'none';
+    document.getElementById('avatarUpload').classList.add('has-file');
+  };
+  reader.readAsDataURL(file);
+}
+
+// ── Deploy Bot ─────────────────────────────────────────────────────────────
+async function deployBot() {
+  const name  = document.getElementById('botName').value.trim();
+  const phone = document.getElementById('botPhone').value.trim().replace(/\D/g, '');
+
+  if (!name)  { toast('Enter a bot name', 'error'); return; }
+  if (!phone) { toast('Enter a phone number', 'error'); return; }
+  if (phone.length < 10) { toast('Phone number too short', 'error'); return; }
+
+  const btn = document.getElementById('deployBtn');
+  btn.innerHTML = '<span class="spinner"></span> Deploying…';
+  btn.disabled = true;
+
+  try {
+    const res = await fetch('/api/bots', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, phone, avatar: avatarBase64 })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Deploy failed');
+
+    closeModal();
+    resetForm();
+    toast(`✓ ${name} deployed! Enter the pairing code on your phone.`, 'success');
+    await fetchBots();
+  } catch (err) {
+    toast(err.message, 'error');
+  } finally {
+    btn.innerHTML = '<i class="ri-rocket-line"></i> Deploy Bot & Get Pairing Code';
+    btn.disabled = false;
+  }
+}
+
+function resetForm() {
+  document.getElementById('botName').value = '';
+  document.getElementById('botPhone').value = '';
+  document.getElementById('avatarInput').value = '';
+  document.getElementById('avatarPreview').style.display = 'none';
+  document.getElementById('avatarPlaceholder').style.display = 'block';
+  document.getElementById('avatarUpload').classList.remove('has-file');
+  avatarBase64 = null;
+}
+
+// ── Restart Bot ────────────────────────────────────────────────────────────
+async function restartBot(id) {
+  const bot = bots.find(b => b.id === id);
+  try {
+    const res = await fetch(`/api/bots/${id}/restart`, { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error);
+    toast(`↺ ${bot?.name || 'Bot'} restarting…`, 'success');
+    await fetchBots();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+// ── Delete Bot ─────────────────────────────────────────────────────────────
+function confirmDelete(id) {
+  const card = document.getElementById('card-' + id);
+  if (!card) return;
+  const bot = bots.find(b => b.id === id);
+
+  const overlay = document.createElement('div');
+  overlay.className = 'confirm-card';
+  overlay.id = 'confirm-' + id;
+  overlay.innerHTML = `
+    <i class="ri-delete-bin-6-line" style="font-size:2rem;color:var(--red)"></i>
+    <p>Remove <strong>${bot?.name || 'this bot'}</strong>?<br>Its session and data will be deleted.</p>
+    <div class="confirm-actions">
+      <button class="btn btn-ghost btn-sm" onclick="cancelDelete('${id}')">Cancel</button>
+      <button class="btn btn-danger btn-sm" onclick="doDelete('${id}')"><i class="ri-delete-bin-line"></i> Remove</button>
+    </div>`;
+  card.style.position = 'relative';
+  card.appendChild(overlay);
+}
+
+function cancelDelete(id) {
+  const el = document.getElementById('confirm-' + id);
+  if (el) el.remove();
+}
+
+async function doDelete(id) {
+  const bot = bots.find(b => b.id === id);
+  try {
+    const res = await fetch(`/api/bots/${id}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error('Delete failed');
+    toast(`🗑 ${bot?.name || 'Bot'} removed`, 'success');
+    await fetchBots();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+// ── Copy Pairing Code ──────────────────────────────────────────────────────
+function copyCode(code) {
+  navigator.clipboard.writeText(code.replace(/-/g, '')).then(() => {
+    toast('Pairing code copied!', 'success');
+  });
+}
+
+// ── Fetch & Render ─────────────────────────────────────────────────────────
+async function fetchBots() {
+  try {
+    const res  = await fetch('/api/bots');
+    bots = await res.json();
+    renderBots();
+    updateStats();
+  } catch {}
+}
+
+function formatUptime(ms) {
+  if (!ms) return '—';
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ${s % 60}s`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ${m % 60}m`;
+  return `${Math.floor(h / 24)}d ${h % 24}h`;
+}
+
+function fmtNum(n) {
+  if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+  if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
+  return n;
+}
+
+function statusLabel(status) {
+  const map = {
+    connected: 'Online',
+    connecting: 'Connecting',
+    reconnecting: 'Reconnecting',
+    disconnected: 'Offline',
+    offline: 'Offline'
+  };
+  return map[status] || status;
+}
+
+function renderBots() {
+  const grid = document.getElementById('botsGrid');
+  const empty = document.getElementById('emptyState');
+
+  if (!bots.length) {
+    grid.innerHTML = '';
+    grid.appendChild(empty);
+    return;
+  }
+
+  // Remove empty state
+  if (empty.parentNode === grid) grid.removeChild(empty);
+
+  // Add/update cards
+  const existingIds = new Set([...grid.querySelectorAll('.bot-card')].map(el => el.id.replace('card-', '')));
+  const newIds = new Set(bots.map(b => b.id));
+
+  // Remove stale
+  existingIds.forEach(id => { if (!newIds.has(id)) document.getElementById('card-' + id)?.remove(); });
+
+  bots.forEach(bot => {
+    // Don't overwrite if confirm dialog is open
+    if (document.getElementById('confirm-' + bot.id)) return;
+
+    const existing = document.getElementById('card-' + bot.id);
+    const html = buildCardHTML(bot);
+
+    if (existing) {
+      const tmp = document.createElement('div');
+      tmp.innerHTML = html;
+      const newCard = tmp.firstElementChild;
+      // Preserve card position
+      existing.replaceWith(newCard);
+    } else {
+      const tmp = document.createElement('div');
+      tmp.innerHTML = html;
+      grid.appendChild(tmp.firstElementChild);
+    }
+  });
+}
+
+function buildCardHTML(bot) {
+  const avatarHTML = bot.avatarPath
+    ? `<img class="bot-avatar" src="${bot.avatarPath}" alt="${bot.name}" onerror="this.style.display='none';this.nextElementSibling.style.display='grid'"/><div class="bot-avatar-placeholder" style="display:none"><i class="ri-robot-line"></i></div>`
+    : `<div class="bot-avatar-placeholder"><i class="ri-robot-line"></i></div>`;
+
+  const pairingHTML = bot.pairingCode ? `
+    <div class="pairing-block">
+      <div class="pairing-label"><i class="ri-key-line"></i> Pairing Code</div>
+      <div class="pairing-code">
+        ${bot.pairingCode}
+        <button class="copy-btn" onclick="copyCode('${bot.pairingCode}')"><i class="ri-clipboard-line"></i> Copy</button>
+      </div>
+      <div class="pairing-hint">
+        On your phone: <strong>Settings → Linked Devices → Link a Device → Link with phone number</strong>
+      </div>
+    </div>` : '';
+
+  const restartDisabled = (bot.status === 'connecting' || bot.status === 'reconnecting') ? 'disabled style="opacity:.5;cursor:not-allowed"' : '';
+
+  return `
+  <div class="bot-card ${bot.status}" id="card-${bot.id}">
+    <div class="card-top">
+      ${avatarHTML}
+      <div class="bot-info">
+        <div class="bot-name">${bot.name}</div>
+        <div class="bot-phone"><i class="ri-phone-line"></i> ${bot.phone || '—'}</div>
+        <span class="status-badge ${bot.status}">
+          <span class="dot"></span>${statusLabel(bot.status)}
+        </span>
+      </div>
+    </div>
+
+    ${pairingHTML}
+
+    <div class="card-stats">
+      <div class="stat-block">
+        <div class="label"><i class="ri-message-3-line"></i> Messages</div>
+        <div class="value">${fmtNum(bot.messages)}</div>
+      </div>
+      <div class="stat-block">
+        <div class="label"><i class="ri-time-line"></i> Uptime</div>
+        <div class="value">${bot.status === 'connected' ? formatUptime(bot.uptime) : '—'}</div>
+      </div>
+    </div>
+
+    <div class="card-actions">
+      <button class="btn btn-ghost btn-sm" onclick="restartBot('${bot.id}')" ${restartDisabled}>
+        <i class="ri-refresh-line"></i> Restart
+      </button>
+      <button class="btn btn-danger btn-sm" onclick="confirmDelete('${bot.id}')">
+        <i class="ri-delete-bin-line"></i> Remove
+      </button>
+    </div>
+  </div>`;
+}
+
+function updateStats() {
+  const total     = bots.length;
+  const connected = bots.filter(b => b.status === 'connected').length;
+  const pairing   = bots.filter(b => b.pairingCode).length;
+  const messages  = bots.reduce((s, b) => s + (b.messages || 0), 0);
+
+  document.getElementById('totalCount').textContent     = total;
+  document.getElementById('connectedCount').textContent = connected;
+  document.getElementById('pairingCount').textContent   = pairing;
+  document.getElementById('messagesCount').textContent  = fmtNum(messages);
+  document.getElementById('onlineText').textContent     = `${connected} online`;
+}
+
+// ── Toast ──────────────────────────────────────────────────────────────────
+function toast(msg, type = 'info') {
+  const icon = type === 'success' ? 'ri-checkbox-circle-fill' : type === 'error' ? 'ri-error-warning-fill' : 'ri-information-fill';
+  const el = document.createElement('div');
+  el.className = `toast ${type}`;
+  el.innerHTML = `<i class="${icon}"></i> ${msg}`;
+  document.getElementById('toastContainer').appendChild(el);
+  setTimeout(() => {
+    el.style.animation = 'slideOut .3s ease forwards';
+    setTimeout(() => el.remove(), 300);
+  }, 3500);
+}
+
+// ── Keyboard ───────────────────────────────────────────────────────────────
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeModal();
+  if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); openModal(); }
+});
+
+// ── Enter key on form ──────────────────────────────────────────────────────
+['botName','botPhone'].forEach(id => {
+  document.getElementById(id).addEventListener('keydown', e => {
+    if (e.key === 'Enter') deployBot();
+  });
+});
+
+// ── Init ───────────────────────────────────────────────────────────────────
+fetchBots();
+pollInterval = setInterval(fetchBots, 4000);
+</script>
+</body>
+</html>
