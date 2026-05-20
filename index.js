@@ -45,9 +45,11 @@ const rl = readline.createInterface({ input: process.stdin, output: process.stdo
 const question = (q) => new Promise((res) => rl.question(q, res));
 
 // Initialize Express API
+const app = express();
+
 app.use(cors({
   origin: [
-    'https://konosubaweb.vercel.app/',
+    'https://konosubaweb.vercel.app',
     'http://localhost:3000',
     'http://localhost:5000'
   ],
