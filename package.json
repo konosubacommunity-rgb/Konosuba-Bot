@@ -2,10 +2,12 @@
   "name": "aqua-bot",
   "version": "1.0.0",
   "description": "Aqua WhatsApp Bot - KONOSUBA Community Bot",
-  "main": "index.js",
+  "main": "web.js",
   "scripts": {
-    "start": "node index.js",
-    "start:web": "node web.js"
+    "start": "node web.js",
+    "start:web": "node web.js",
+    "start:bot": "node bot-worker.js",
+    "start:api": "node api-server.js"
   },
   "dependencies": {
     "@ffmpeg-installer/ffmpeg": "^1.1.0",
@@ -32,8 +34,5 @@
   },
   "engines": {
     "node": ">=18.0.0"
-  },
-  "devDependencies": {
-    "adm-zip": "^0.5.17"
   }
 }

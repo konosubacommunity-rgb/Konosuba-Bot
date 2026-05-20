@@ -298,4 +298,33 @@ router.post('/user/:phone/activity', verifyBotSecret, async (req, res) => {
   }
 });
 
+// ── GET /api/leaderboard ──────────────────────────────────────────────────────
+//  Returns top 20 users by wallet + bank (net worth).
+//  Public endpoint — no auth required.
+//
+router.get('/leaderboard', async (req, res) => {
+  try {
+    const users = await User.find({ registered: true })
+      .sort({ wallet: -1 })
+      .limit(20)
+      .select('name username wallet bank level xp jid');
+
+    return res.json({
+      users: users.map((u, i) => ({
+        rank:     i + 1,
+        username: u.username || u.name || 'Unknown',
+        level:    u.level,
+        xp:       u.xp,
+        wallet:   u.wallet,
+        bank:     u.bank,
+        netWorth: (u.wallet || 0) + (u.bank || 0),
+        phone:    u.jid ? u.jid.split('@')[0] : null,
+      })),
+    });
+  } catch (err) {
+    console.error('Leaderboard error:', err.message);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
 module.exports = router;

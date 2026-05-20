@@ -1,5 +1,6 @@
 require('dotenv').config();
 const express = require('express');
+const cors    = require('cors');
 const {
   default: makeWASocket,
   useMultiFileAuthState,
@@ -14,7 +15,7 @@ const path = require('path');
 const fs   = require('fs');
 const pino = require('pino');
 
-// ── Bot logic imports (same as index.js) ─────────────────────────────────────
+// ── Bot logic imports ─────────────────────────────────────────────────────────
 const { connectDB }        = require('./src/database');
 const config               = require('./src/config');
 const User                 = require('./src/models/User');
@@ -33,11 +34,30 @@ const { handleRpg }                  = require('./src/commands/rpg');
 const { handleGuild }                = require('./src/commands/guild');
 const { isOwner }                    = require('./src/utils/helpers');
 
+// ── Website sync API routes ───────────────────────────────────────────────────
+const websiteSyncRoutes = require('./src/routes/website-sync');
+
 const app  = express();
 const PORT = process.env.WEB_PORT || process.env.PORT || 3000;
 
+// ── CORS — allow the Vercel website to talk to this server ────────────────────
+app.use(cors({
+  origin: process.env.WEBSITE_URL || '*',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-bot-secret'],
+  credentials: true,
+}));
+
 app.use(express.json({ limit: '15mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
+
+// ── Mount website sync routes at /api ─────────────────────────────────────────
+//  Provides: /api/auth/signup, /api/auth/login, /api/user/:phone,
+//            /api/user/:phone/activity, /api/leaderboard, /api/sync
+app.use('/api', websiteSyncRoutes);
+
+// ── Health check (for UptimeRobot to ping so Render doesn't sleep) ────────────
+app.get('/health', (_req, res) => res.json({ status: 'ok', ts: Date.now() }));
 
 // ── Storage ───────────────────────────────────────────────────────────────────
 const BOTS_FILE    = path.join(__dirname, 'bots.json');
@@ -343,7 +363,7 @@ function killBot(botId) {
   pairingStore.delete(botId);
 }
 
-// ── REST API ──────────────────────────────────────────────────────────────────
+// ── Bot Manager REST API ──────────────────────────────────────────────────────
 
 app.get('/api/bots', (_req, res) => {
   const bots = loadBots();
@@ -365,13 +385,11 @@ app.get('/api/bots', (_req, res) => {
   }));
 });
 
-// ── Command log endpoint ──────────────────────────────────────────────────────
 app.get('/api/bots/:id/logs', (req, res) => {
   const { id }  = req.params;
   const bots    = loadBots();
   if (!bots[id]) return res.status(404).json({ error: 'Bot not found' });
   const log = commandLogs.get(id) || [];
-  // Return newest-first
   res.json([...log].reverse());
 });
 
@@ -477,6 +495,7 @@ app.post('/api/bots/:id/restart', async (req, res) => {
   }
 });
 
+// ── Catch-all: serve Bot Manager UI ──────────────────────────────────────────
 app.get('*', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
