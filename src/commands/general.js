@@ -6,6 +6,10 @@ const Group = require('../models/Group');
 const { formatMs, formatMoney, isOwner, getUserName } = require('../utils/helpers');
 const { generateProfileCard, generateBalanceCard } = require('../utils/imageGen');
 
+// ── Change this to your actual Vercel URL ──────────────────────────────────
+const WEBSITE_URL = process.env.WEBSITE_URL || 'https://konosubaweb.vercel.app';
+// ───────────────────────────────────────────────────────────────────────────
+
 const MENU_TEXT = `Hᴇʏʏʏʏʏ {user}... ɪ'ᴍ Aǫᴜᴀ ꜰʀᴏᴍ ᴛʜᴇ  𝐊𝚯𝐍𝚯𝐒𝐔𝐁𝚫 ᴄᴏᴍᴜɴɪᴛʏ ɴɪᴄᴇ ᴛᴏ ᴍᴇᴇᴛ ʏᴏᴜ!
 
 Cʜᴇᴄᴋ ʙᴇʟᴏᴡ ғᴏʀ ᴀᴠᴀɪʟᴀʙʟᴇ ᴄᴏᴍᴍᴀɴᴅs ✦
@@ -118,8 +122,6 @@ Cʜᴇᴄᴋ ʙᴇʟᴏᴡ ғᴏʀ ᴀᴠᴀɪʟᴀʙʟᴇ ᴄᴏᴍᴍᴀɴᴅs
 ┃ ⤷ .emojify <text>
 ┃ ⤷ .rps <rock/paper/scissors>
 ┃ ⤷ .wouldyourather
-┃ ⤷ .howgay @user
-┃ ⤷ .howcool @user
 ┃
 ╰━━━━━━━━━━━━━━━━
 
@@ -235,30 +237,27 @@ Cʜᴇᴄᴋ ʙᴇʟᴏᴡ ғᴏʀ ᴀᴠᴀɪʟᴀʙʟᴇ ᴄᴏᴍᴍᴀɴᴅs
 async function handleGeneral(sock, message, command, args, sender, isGroup, groupJid) {
   const userName = message.pushName || sender.split('@')[0];
 
+  // ── .menu ────────────────────────────────────────────────────────────────
   if (command === 'menu') {
     const menuText = MENU_TEXT.replace('{user}', userName);
     const menuImagePath = path.join(__dirname, '../../assets/menu.jpg');
     const imageBuffer = fs.readFileSync(menuImagePath);
     await sock.sendMessage(
       isGroup ? groupJid : sender,
-      {
-        image: imageBuffer,
-        caption: menuText,
-      },
+      { image: imageBuffer, caption: menuText },
       { quoted: message }
     );
     return true;
   }
 
+  // ── .mods ────────────────────────────────────────────────────────────────
   if (command === 'mods') {
     const modUsers = await User.find({ isMod: true });
     const mods = modUsers.map(u => u.jid);
-    let modList = '';
-    if (mods.length === 0) {
-      modList = '> No moderators set yet.';
-    } else {
-      modList = mods.map(m => `🩵 @${m.split('@')[0]}`).join('\n');
-    }
+    let modList = mods.length === 0
+      ? '> No moderators set yet.'
+      : mods.map(m => `🩵 @${m.split('@')[0]}`).join('\n');
+
     const text = `Hᴇʟʟᴏ ${userName}, ᴛʜɪꜱ ᴀʀᴇ ᴍʏ ᴍᴏᴅᴇʀᴀᴛᴏʀꜱ ɪɴ 𝐊𝚯𝐍𝚯𝐒𝐔𝐁𝚫, ᴏᴋᴀʏ?! 🩵 
 
 > Aɴᴅ ʜᴇʏ! ʏᴏᴜ'ʀᴇ ᴏɴʟʏ ꜱᴜᴘᴘᴏꜱᴇᴅ ᴛᴏ ᴅᴍ ᴛʜᴇᴍ ꜰᴏʀ *Iᴍᴘᴏʀᴛᴀɴᴛ Rᴇᴀꜱᴏɴꜱ!!*
@@ -276,6 +275,7 @@ ${modList}
     return true;
   }
 
+  // ── .ping ────────────────────────────────────────────────────────────────
   if (command === 'ping') {
     const start = Date.now();
     await sock.sendMessage(
@@ -291,6 +291,7 @@ ${modList}
     return true;
   }
 
+  // ── .profile / .p ────────────────────────────────────────────────────────
   if (command === 'p' || command === 'profile') {
     let targetJid = sender;
     const quotedSender = message.message?.extendedTextMessage?.contextInfo?.participant;
@@ -305,27 +306,22 @@ ${modList}
     }
 
     let avatarUrl = null;
-    try {
-      avatarUrl = await sock.profilePictureUrl(targetJid, 'image');
-    } catch (_) {}
+    try { avatarUrl = await sock.profilePictureUrl(targetJid, 'image'); } catch (_) {}
 
     let imageBuffer;
-    try {
-      imageBuffer = await generateProfileCard(user, avatarUrl);
-    } catch (e) {
-      imageBuffer = null;
-    }
+    try { imageBuffer = await generateProfileCard(user, avatarUrl); } catch (e) { imageBuffer = null; }
 
     const isBanned = user.banned ? 'Yes' : 'No';
+    const isRegistered = user.registered ? '✅ Linked to website' : '❌ Not registered';
     const text = `👤 𝗡𝗮𝗺𝗲: ${user.name}
 🆔 𝗜𝗗: ${user.jid.split('@')[0]}
 📛 𝗧𝗮𝗴: @${user.jid.split('@')[0]}
 📅 𝗝𝗼𝗶𝗻𝗲𝗱: ${user.joinedAt ? new Date(user.joinedAt).toDateString() : 'N/A'}
 🚫 𝗕𝗮𝗻𝗻𝗲𝗱: ${isBanned}
+🌐 𝗪𝗲𝗯𝘀𝗶𝘁𝗲: ${isRegistered}
 
 💰 𝗕𝗮𝗹𝗮𝗻𝗰𝗲: ${formatMoney(user.wallet)}
 🏦 𝗕𝗮𝗻𝗸: ${formatMoney(user.bank)}
-💼 𝗪𝗮𝗹𝗹𝗲𝘁: ${formatMoney(user.wallet)}
 💎 𝗡𝗲𝘁 𝗪𝗼𝗿𝘁𝗵: ${formatMoney(user.wallet + user.bank)}
 
 📊 𝗟𝗲𝘃𝗲𝗹: ${user.level}
@@ -346,27 +342,59 @@ ${modList}
     return true;
   }
 
+  // ── .reg / .register ─────────────────────────────────────────────────────
+  //
+  //  HOW SYNC WORKS:
+  //  The phone number IS the shared key between WhatsApp and the website.
+  //  MongoDB stores the user as jid = "phone@s.whatsapp.net".
+  //  When someone registers on the website with their WhatsApp number,
+  //  it creates (or upgrades) that exact same document.
+  //  Any XP, wallet, bank, level changes on WhatsApp immediately
+  //  reflect on the website dashboard — same database, same document.
+  //
   if (command === 'reg' || command === 'register') {
     const dest = isGroup ? groupJid : sender;
+
     let user = await User.findOne({ jid: sender });
     if (!user) {
       user = new User({ jid: sender, name: message.pushName || sender.split('@')[0] });
+      await user.save();
     }
+
     if (user.registered) {
       await sock.sendMessage(dest, {
-        text: `⚠️ You are already registered to Konosuba!`,
+        text: `✅ *Already Registered!*
+
+📱 Your number is linked to Konosuba.
+
+🌐 *View your live dashboard:*
+${WEBSITE_URL}/dashboard
+
+> Login with your WhatsApp number and your password.`,
       }, { quoted: message });
       return true;
     }
-    user.registered = true;
-    user.wallet = (user.wallet || 0) + 43000;
-    await user.save();
+
+    const phoneNumber = sender.split('@')[0];
     await sock.sendMessage(dest, {
-      text: `✅ You have successfully Registered to Konosuba and you have been granted *$43000* as welcome bonus`,
+      text: `🧿 *Register to Konosuba!*
+━━━━━━━━━━━━━━━━━━━━━
+
+To create your account, visit:
+🌐 *${WEBSITE_URL}*
+
+📱 *Your number to use:*
+*${phoneNumber}*
+
+━━━━━━━━━━━━━━━━━━━━━
+> Use the exact number above when signing up — it's how we link your WhatsApp activity to your website account.
+
+> You'll receive a *$43,000 welcome bonus* 🎉 and your wallet 💰, bank 🏦, level ⭐ and XP ⚡ will all sync live between WhatsApp and the website!`,
     }, { quoted: message });
     return true;
   }
 
+  // ── .addmod ──────────────────────────────────────────────────────────────
   if (command === 'addmod') {
     if (!isOwner(sender)) {
       await sock.sendMessage(isGroup ? groupJid : sender, { text: '*🚫 Access Denied*' }, { quoted: message });
@@ -392,6 +420,7 @@ ${modList}
     return true;
   }
 
+  // ── .removemod ───────────────────────────────────────────────────────────
   if (command === 'removemod') {
     if (!isOwner(sender)) {
       await sock.sendMessage(isGroup ? groupJid : sender, { text: '*🚫 Access Denied*' }, { quoted: message });
