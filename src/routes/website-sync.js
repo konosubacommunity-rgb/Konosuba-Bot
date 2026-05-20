@@ -37,6 +37,27 @@ function verifyBotSecret(req, res, next) {
   next();
 }
 
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'konosuba_admin';
+
+function verifyAdminPassword(req, res, next) {
+  const pw = req.headers['x-admin-password'] || req.body?.adminPassword;
+  if (!pw || pw !== ADMIN_PASSWORD) {
+    return res.status(403).json({ success: false, message: 'Invalid admin password' });
+  }
+  next();
+}
+
+// ── POST /api/admin/auth ──────────────────────────────────────────────────────
+//  Validate the admin password from the UI before showing user management.
+//
+router.post('/admin/auth', (req, res) => {
+  const pw = req.body?.password;
+  if (!pw || pw !== ADMIN_PASSWORD) {
+    return res.status(403).json({ success: false, message: 'Wrong password' });
+  }
+  return res.json({ success: true });
+});
+
 function verifyToken(req, res, next) {
   const token = req.headers.authorization?.split(' ')[1];
   if (!token) return res.status(401).json({ success: false, message: 'No token provided' });
@@ -294,6 +315,178 @@ router.post('/user/:phone/activity', verifyBotSecret, async (req, res) => {
 
   } catch (err) {
     console.error('Activity log error:', err.message);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// ── GET /api/admin/users/search ───────────────────────────────────────────────
+//  Search for a user by phone number. Protected by admin password.
+//
+router.get('/admin/users/search', verifyAdminPassword, async (req, res) => {
+  try {
+    const { phone } = req.query;
+    if (!phone) return res.status(400).json({ success: false, message: 'phone query param required' });
+
+    const user = await User.findOne({ jid: `${phone.replace(/\D/g, '')}@s.whatsapp.net` })
+      .select('jid name username wallet bank level xp streak registered banned createdAt updatedAt');
+
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+
+    return res.json({
+      success: true,
+      user: {
+        phone:      user.jid.split('@')[0],
+        name:       user.name,
+        username:   user.username,
+        wallet:     user.wallet,
+        bank:       user.bank,
+        level:      user.level,
+        xp:         user.xp,
+        streak:     user.streak,
+        registered: user.registered,
+        banned:     user.banned,
+        createdAt:  user.createdAt,
+        updatedAt:  user.updatedAt,
+      },
+    });
+  } catch (err) {
+    console.error('Search user error:', err.message);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// ── GET /api/admin/users ──────────────────────────────────────────────────────
+//  List all registered users. Protected by admin password.
+//
+router.get('/admin/users', verifyAdminPassword, async (req, res) => {
+  try {
+    const users = await User.find({ registered: true })
+      .select('jid name username wallet bank level xp registered banned createdAt')
+      .sort({ createdAt: -1 })
+      .limit(100);
+
+    return res.json({
+      success: true,
+      count: users.length,
+      users: users.map(u => ({
+        phone:      u.jid.split('@')[0],
+        name:       u.name,
+        username:   u.username,
+        wallet:     u.wallet,
+        bank:       u.bank,
+        level:      u.level,
+        xp:         u.xp,
+        registered: u.registered,
+        banned:     u.banned,
+        createdAt:  u.createdAt,
+      })),
+    });
+  } catch (err) {
+    console.error('List users error:', err.message);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// ── POST /api/admin/reset-user ────────────────────────────────────────────────
+//  Reset a single user's economy/stats back to defaults (keeps their account).
+//  Protected by admin password.
+//
+router.post('/admin/reset-user', verifyAdminPassword, async (req, res) => {
+  try {
+    const { phone } = req.body;
+    if (!phone) return res.status(400).json({ success: false, message: 'phone is required' });
+
+    const user = await User.findOneAndUpdate(
+      { jid: `${phone.replace(/\D/g, '')}@s.whatsapp.net` },
+      {
+        $set: {
+          wallet:       500,
+          bank:         0,
+          bankLimit:    10000,
+          level:        1,
+          xp:           0,
+          rank:         0,
+          streak:       0,
+          lastStreak:   null,
+          warnings:     0,
+          inventory:    [],
+          achievements: [],
+          missions:     0,
+          pokemon:      [],
+          starter:      false,
+          pokeBalls:    5,
+          buddy:        null,
+          cooldowns:    {},
+          quests:       [],
+          activities:   [],
+          guild:        null,
+          'rpg.class':       'Adventurer',
+          'rpg.hp':          100,
+          'rpg.maxHp':       100,
+          'rpg.attack':      10,
+          'rpg.defense':     5,
+          'rpg.speed':       8,
+          'rpg.weapon':      'Iron Sword',
+          'rpg.armor':       'Leather Armor',
+          'rpg.gold':        0,
+          'rpg.dungeonLevel': 1,
+          'rpg.skills':      [],
+          'rpg.prestige':    0,
+          'pet.name':   null,
+          'pet.type':   null,
+          'pet.level':  1,
+          'pet.hunger': 100,
+          'pet.xp':     0,
+        },
+      },
+      { new: true }
+    );
+
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+
+    return res.json({
+      success: true,
+      message: `Stats for ${user.name} (${phone}) have been reset to defaults. Their account and password are intact.`,
+    });
+  } catch (err) {
+    console.error('Reset user error:', err.message);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// ── DELETE /api/admin/delete-user ─────────────────────────────────────────────
+//  Fully delete a single user document. Protected by admin password.
+//
+router.delete('/admin/delete-user', verifyAdminPassword, async (req, res) => {
+  try {
+    const { phone } = req.body;
+    if (!phone) return res.status(400).json({ success: false, message: 'phone is required' });
+
+    const result = await User.deleteOne({ jid: `${phone.replace(/\D/g, '')}@s.whatsapp.net` });
+
+    if (result.deletedCount === 0) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    return res.json({ success: true, message: `User ${phone} has been permanently deleted.` });
+  } catch (err) {
+    console.error('Delete user error:', err.message);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// ── POST /api/admin/reset-users ───────────────────────────────────────────────
+//  Wipes ALL user documents. Protected by admin password.
+//
+router.post('/admin/reset-users', verifyAdminPassword, async (req, res) => {
+  try {
+    const result = await User.deleteMany({});
+    return res.json({
+      success: true,
+      message: `Deleted ${result.deletedCount} user(s). All users must now sign up via the website first.`,
+    });
+  } catch (err) {
+    console.error('Reset users error:', err.message);
     return res.status(500).json({ success: false, message: 'Server error' });
   }
 });

@@ -246,11 +246,20 @@ async function startBot(botId) {
           group:   groupJid ? groupJid.split('@')[0] : null
         });
 
+        // ── Website-first: only registered users can use commands ────────────
         let user = await User.findOne({ jid: sender });
-        if (!user) {
-          user = new User({ jid: sender, name: message.pushName || sender.split('@')[0] });
-          await user.save();
-        } else if (user.name !== message.pushName && message.pushName) {
+
+        if (!user || !user.registered) {
+          const phone = sender.split('@')[0];
+          const websiteUrl = process.env.WEBSITE_URL || 'https://konosubaweb.vercel.app';
+          await sock.sendMessage(dest, {
+            text: `👋 Hey *${message.pushName || phone}*!\n\nYou need to *register on the Konosuba website first* before you can use bot commands.\n\n🌐 *Sign up at:*\n${websiteUrl}\n\n📱 Use your WhatsApp number when signing up:\n*${phone}*\n\n> Once registered, all your wallet 💰, bank 🏦, level ⭐ and XP ⚡ will sync live between WhatsApp and the website!`,
+          }, { quoted: message });
+          continue;
+        }
+
+        // Keep display name fresh
+        if (user.name !== message.pushName && message.pushName) {
           user.name = message.pushName;
           await user.save();
         }

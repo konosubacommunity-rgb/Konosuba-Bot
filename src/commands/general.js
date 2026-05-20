@@ -300,9 +300,12 @@ ${modList}
     else if (mentions.length > 0) targetJid = mentions[0];
 
     let user = await User.findOne({ jid: targetJid });
-    if (!user) {
-      user = new User({ jid: targetJid, name: targetJid.split('@')[0] });
-      await user.save();
+    if (!user || !user.registered) {
+      await sock.sendMessage(isGroup ? groupJid : sender, {
+        text: `❌ @${targetJid.split('@')[0]} hasn't registered on the Konosuba website yet.\n\n🌐 They can sign up at:\n${WEBSITE_URL}`,
+        mentions: [targetJid],
+      }, { quoted: message });
+      return true;
     }
 
     let avatarUrl = null;
@@ -354,42 +357,39 @@ ${modList}
   //
   if (command === 'reg' || command === 'register') {
     const dest = isGroup ? groupJid : sender;
+    const phoneNumber = sender.split('@')[0];
 
-    let user = await User.findOne({ jid: sender });
-    if (!user) {
-      user = new User({ jid: sender, name: message.pushName || sender.split('@')[0] });
-      await user.save();
-    }
+    const user = await User.findOne({ jid: sender });
 
-    if (user.registered) {
+    if (user && user.registered) {
       await sock.sendMessage(dest, {
         text: `✅ *Already Registered!*
 
-📱 Your number is linked to Konosuba.
+📱 Your WhatsApp number is linked to Konosuba.
 
 🌐 *View your live dashboard:*
 ${WEBSITE_URL}/dashboard
 
-> Login with your WhatsApp number and your password.`,
+> Log in with your WhatsApp number and your password.`,
       }, { quoted: message });
       return true;
     }
 
-    const phoneNumber = sender.split('@')[0];
+    // Not registered — direct them to the website
     await sock.sendMessage(dest, {
-      text: `🧿 *Register to Konosuba!*
+      text: `🧿 *Join Konosuba!*
 ━━━━━━━━━━━━━━━━━━━━━
 
-To create your account, visit:
+To create your account, visit the website *first*:
 🌐 *${WEBSITE_URL}*
 
-📱 *Your number to use:*
+📱 *Your WhatsApp number to use:*
 *${phoneNumber}*
 
 ━━━━━━━━━━━━━━━━━━━━━
-> Use the exact number above when signing up — it's how we link your WhatsApp activity to your website account.
-
-> You'll receive a *$43,000 welcome bonus* 🎉 and your wallet 💰, bank 🏦, level ⭐ and XP ⚡ will all sync live between WhatsApp and the website!`,
+> Sign up on the website using the exact number above.
+> Once registered, you can use all bot commands and your wallet 💰, bank 🏦, level ⭐ and XP ⚡ will sync live!
+> You'll also receive a *$43,000 welcome bonus* 🎉`,
     }, { quoted: message });
     return true;
   }
