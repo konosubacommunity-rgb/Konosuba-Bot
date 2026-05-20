@@ -1,6 +1,5 @@
 require('dotenv').config();
 
-// ── Keep the process alive even if a bot crashes ──────────────────────────────
 process.on('uncaughtException',       err => console.error('uncaughtException:', err.message));
 process.on('unhandledRejection', (reason) => console.error('unhandledRejection:', reason));
 
@@ -8,7 +7,6 @@ const express = require('express');
 const cors    = require('cors');
 const {
   default: makeWASocket,
-  useMultiFileAuthState,
   DisconnectReason,
   fetchLatestBaileysVersion,
   makeCacheableSignalKeyStore,
@@ -20,11 +18,12 @@ const path = require('path');
 const fs   = require('fs');
 const pino = require('pino');
 
-// ── Bot logic imports ─────────────────────────────────────────────────────────
-const { connectDB }        = require('./src/database');
-const config               = require('./src/config');
-const User                 = require('./src/models/User');
-const Group                = require('./src/models/Group');
+const { connectDB }          = require('./src/database');
+const config                 = require('./src/config');
+const User                   = require('./src/models/User');
+const Group                  = require('./src/models/Group');
+const BotConfig              = require('./src/models/BotConfig');
+const { useMongoDBAuthState } = require('./src/utils/mongoAuthState');
 
 const { handleGeneral }              = require('./src/commands/general');
 const { handleAdmin }                = require('./src/commands/admin');
@@ -39,13 +38,11 @@ const { handleRpg }                  = require('./src/commands/rpg');
 const { handleGuild }                = require('./src/commands/guild');
 const { isOwner }                    = require('./src/utils/helpers');
 
-// ── Website sync API routes ───────────────────────────────────────────────────
 const websiteSyncRoutes = require('./src/routes/website-sync');
 
 const app  = express();
 const PORT = process.env.WEB_PORT || process.env.PORT || 3000;
 
-// ── CORS — allow the Vercel website to talk to this server ────────────────────
 app.use(cors({
   origin: process.env.WEBSITE_URL || '*',
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -56,37 +53,17 @@ app.use(cors({
 app.use(express.json({ limit: '15mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
-// ── Mount website sync routes at /api ─────────────────────────────────────────
-//  Provides: /api/auth/signup, /api/auth/login, /api/user/:phone,
-//            /api/user/:phone/activity, /api/leaderboard, /api/sync
 app.use('/api', websiteSyncRoutes);
 
-// ── Health check (for UptimeRobot to ping so Render doesn't sleep) ────────────
 app.get('/health', (_req, res) => res.json({ status: 'ok', ts: Date.now() }));
-
-// ── Storage ───────────────────────────────────────────────────────────────────
-const BOTS_FILE    = path.join(__dirname, 'bots.json');
-const SESSIONS_DIR = path.join(__dirname, 'bot-sessions');
-const AVATARS_DIR  = path.join(__dirname, 'public', 'bot-avatars');
-
-[SESSIONS_DIR, AVATARS_DIR].forEach(d => {
-  if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true });
-});
-
-function loadBots() {
-  if (!fs.existsSync(BOTS_FILE)) return {};
-  try { return JSON.parse(fs.readFileSync(BOTS_FILE, 'utf8')); } catch { return {}; }
-}
-function saveBots(bots) { fs.writeFileSync(BOTS_FILE, JSON.stringify(bots, null, 2)); }
 
 // ── State ─────────────────────────────────────────────────────────────────────
 // id → { sock, status, messages, startTime, registered, needsCode }
 const botInstances = new Map();
-const pairingStore = new Map(); // id → { code, expiresAt }
+const pairingStore = new Map();
 
-// Per-bot circular command log (max 100 entries each)
-const LOG_MAX = 100;
-const commandLogs = new Map(); // id → Array<LogEntry>
+const LOG_MAX    = 100;
+const commandLogs = new Map();
 
 function pushLog(botId, entry) {
   if (!commandLogs.has(botId)) commandLogs.set(botId, []);
@@ -97,23 +74,18 @@ function pushLog(botId, entry) {
 
 // ── Core: start a bot ─────────────────────────────────────────────────────────
 async function startBot(botId) {
-  const bots      = loadBots();
-  const botConfig = bots[botId];
-  if (!botConfig) throw new Error('Bot config not found');
+  const botCfg = await BotConfig.findOne({ botId }).lean();
+  if (!botCfg) throw new Error('Bot config not found');
 
-  const sessionDir = path.join(SESSIONS_DIR, botId);
-  fs.mkdirSync(sessionDir, { recursive: true });
+  // MongoDB-backed auth state — survives Render restarts
+  const { state, saveCreds } = await useMongoDBAuthState(botId);
 
-  const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
-
-  // Fetch latest WA version — fall back to a known-good version if the
-  // network request fails (common on Render cold starts).
   let version = [2, 3000, 1015901307];
   try {
     const result = await fetchLatestBaileysVersion();
     version = result.version;
   } catch (e) {
-    console.warn(`[${botConfig.name}] Could not fetch latest WA version, using fallback`);
+    console.warn(`[${botCfg.name}] Could not fetch latest WA version, using fallback`);
   }
 
   const logger = pino({ level: 'silent' });
@@ -127,7 +99,7 @@ async function startBot(botId) {
     },
     browser:                        Browsers.ubuntu('Chrome'),
     printQRInTerminal:              false,
-    generateHighQualityLinkPreview: false,  // saves memory on free tier
+    generateHighQualityLinkPreview: false,
     defaultQueryTimeoutMs:          60000,
     connectTimeoutMs:               60000,
     keepAliveIntervalMs:            25000,
@@ -158,26 +130,25 @@ async function startBot(botId) {
       const hadCreds   = inst.registered;
 
       if (loggedOut) {
-        console.log(`[${botConfig.name}] Logged out — clearing session`);
+        console.log(`[${botCfg.name}] Logged out — clearing session`);
         inst.status = 'disconnected';
         pairingStore.delete(botId);
-        fs.rmSync(sessionDir, { recursive: true, force: true });
+        // Clear MongoDB session data for this bot
+        const BotSession = require('./src/models/BotSession');
+        await BotSession.deleteMany({ botId }).catch(() => {});
       } else if (!hadCreds && !credsSaved) {
-        // No creds at all — but if we have a valid pairing code the user
-        // might still enter it, so keep the socket alive by reconnecting.
         const pending = pairingStore.get(botId);
         if (pending && pending.expiresAt > Date.now()) {
-          console.log(`[${botConfig.name}] Socket closed while pairing code pending — reconnecting to keep listening…`);
+          console.log(`[${botCfg.name}] Socket closed while pairing code pending — reconnecting…`);
           inst.status = 'connecting';
           setTimeout(() => startBot(botId).catch(e => console.error(e.message)), 5000);
         } else {
-          console.log(`[${botConfig.name}] Pairing connection closed (no creds saved)`);
+          console.log(`[${botCfg.name}] Pairing connection closed (no creds saved)`);
           inst.status = 'disconnected';
         }
       } else {
-        // Normal reconnect after established session disconnect
         inst.status = 'reconnecting';
-        console.log(`[${botConfig.name}] Reconnecting in 5s…`);
+        console.log(`[${botCfg.name}] Reconnecting in 5s…`);
         setTimeout(() => startBot(botId).catch(e => console.error(e.message)), 5000);
       }
     } else if (connection === 'open') {
@@ -185,15 +156,9 @@ async function startBot(botId) {
       inst.startTime  = Date.now();
       inst.registered = true;
       pairingStore.delete(botId);
-      console.log(`[${botConfig.name}] ✓ Connected as ${sock.user?.id}`);
+      console.log(`[${botCfg.name}] ✓ Connected as ${sock.user?.id}`);
 
-      const fresh = loadBots()[botId];
-      if (fresh?.avatarPath) {
-        const imgPath = path.join(__dirname, 'public', fresh.avatarPath);
-        if (fs.existsSync(imgPath)) {
-          sock.updateProfilePicture(sock.user.id, fs.readFileSync(imgPath)).catch(() => {});
-        }
-      }
+      const fresh = await BotConfig.findOne({ botId }).lean();
       if (fresh?.name) sock.updateProfileName(fresh.name).catch(() => {});
     }
   });
@@ -229,7 +194,6 @@ async function startBot(botId) {
         const prefix    = config.PREFIX;
         const isCommand = body.startsWith(prefix);
 
-        // Track group member activity
         if (isGroup) {
           try {
             const now     = new Date();
@@ -273,7 +237,6 @@ async function startBot(botId) {
         const args    = body.slice(prefix.length).trim().split(/\s+/);
         const command = args.shift().toLowerCase();
 
-        // ── Log the command ───────────────────────────────────────────────
         pushLog(botId, {
           time:    Date.now(),
           sender:  sender.split('@')[0],
@@ -304,7 +267,6 @@ async function startBot(botId) {
         }
 
         let handled = false;
-
         handled = await handleGeneral(sock, message, command, args, sender, isGroup, groupJid);
         if (!handled) handled = await handleAdmin(sock, message, command, args, sender, isGroup, groupJid);
         if (!handled) handled = await handleEconomy(sock, message, command, args, sender, isGroup, groupJid);
@@ -318,7 +280,7 @@ async function startBot(botId) {
         if (!handled) handled = await handleGuild(sock, message, command, args, sender, isGroup, groupJid);
 
       } catch (err) {
-        console.error(`[${botConfig.name}] ⚠️ Error handling message:`, err.message);
+        console.error(`[${botCfg.name}] ⚠️ Error handling message:`, err.message);
       }
     }
   });
@@ -344,28 +306,23 @@ async function startBot(botId) {
         }
       }
     } catch (err) {
-      console.error(`[${botConfig.name}] Group update error:`, err.message);
+      console.error(`[${botCfg.name}] Group update error:`, err.message);
     }
   });
 
   // ── Request pairing code ──────────────────────────────────────────────────
   if (!state.creds.registered) {
-    // If we already issued a valid code (from a previous socket that closed
-    // while waiting for the user to scan), do NOT request another one.
-    // Just reconnect silently and wait for the user to enter the code.
-    const existing = pairingStore.get(botId);
+    const existing    = pairingStore.get(botId);
     const hasValidCode = existing && existing.expiresAt > Date.now();
 
     if (hasValidCode) {
-      console.log(`[${botConfig.name}] Reconnected — waiting for pairing code to be entered (${existing.code})`);
+      console.log(`[${botCfg.name}] Reconnected — waiting for pairing code to be entered (${existing.code})`);
     } else {
-      // Run pairing in background so the HTTP response isn't held up
       (async () => {
-        // Give the socket time to stabilise before requesting the code
         await new Promise(r => setTimeout(r, 4000));
 
-        const phone = botConfig.phone.replace(/\D/g, '');
-        console.log(`[${botConfig.name}] Requesting pairing code for +${phone}…`);
+        const phone = botCfg.phone.replace(/\D/g, '');
+        console.log(`[${botCfg.name}] Requesting pairing code for +${phone}…`);
 
         const tryPair = async (attemptsLeft) => {
           try {
@@ -374,22 +331,22 @@ async function startBot(botId) {
             pairingStore.set(botId, { code, expiresAt: Date.now() + 10 * 60 * 1000 });
             const inst = botInstances.get(botId);
             if (inst) inst.needsCode = false;
-            console.log(`[${botConfig.name}] ✓ Pairing code: ${code}`);
+            console.log(`[${botCfg.name}] ✓ Pairing code: ${code}`);
           } catch (err) {
-            console.error(`[${botConfig.name}] Pairing attempt failed: ${err.message}`);
+            console.error(`[${botCfg.name}] Pairing attempt failed: ${err.message}`);
             if (attemptsLeft > 0) {
-              console.log(`[${botConfig.name}] Retrying in 5s… (${attemptsLeft} left)`);
+              console.log(`[${botCfg.name}] Retrying in 5s… (${attemptsLeft} left)`);
               await new Promise(r => setTimeout(r, 5000));
               return tryPair(attemptsLeft - 1);
             }
             const inst = botInstances.get(botId);
             if (inst) inst.needsCode = true;
-            console.error(`[${botConfig.name}] Could not get pairing code after all attempts`);
+            console.error(`[${botCfg.name}] Could not get pairing code after all attempts`);
           }
         };
 
         await tryPair(3);
-      })().catch(e => console.error(`[${botConfig.name}] Pairing background error:`, e.message));
+      })().catch(e => console.error(`[${botCfg.name}] Pairing background error:`, e.message));
     }
   }
 }
@@ -404,31 +361,32 @@ function killBot(botId) {
 
 // ── Bot Manager REST API ──────────────────────────────────────────────────────
 
-app.get('/api/bots', (_req, res) => {
-  const bots = loadBots();
-  res.json(Object.entries(bots).map(([id, bot]) => {
-    const inst    = botInstances.get(id);
-    const pairing = pairingStore.get(id);
-    return {
-      id,
-      name:        bot.name,
-      phone:       bot.phone,
-      avatarPath:  bot.avatarPath || null,
-      createdAt:   bot.createdAt,
-      status:      inst?.status || 'offline',
-      messages:    inst?.messages || 0,
-      uptime:      inst?.startTime ? Date.now() - inst.startTime : 0,
-      pairingCode: pairing && pairing.expiresAt > Date.now() ? pairing.code : null,
-      needsCode:   !!(inst?.needsCode)
-    };
-  }));
+app.get('/api/bots', async (_req, res) => {
+  try {
+    const bots = await BotConfig.find().lean();
+    res.json(bots.map(bot => {
+      const inst    = botInstances.get(bot.botId);
+      const pairing = pairingStore.get(bot.botId);
+      return {
+        id:          bot.botId,
+        name:        bot.name,
+        phone:       bot.phone,
+        avatarPath:  bot.avatarPath || null,
+        createdAt:   bot.createdAt,
+        status:      inst?.status || 'offline',
+        messages:    inst?.messages || 0,
+        uptime:      inst?.startTime ? Date.now() - inst.startTime : 0,
+        pairingCode: pairing && pairing.expiresAt > Date.now() ? pairing.code : null,
+        needsCode:   !!(inst?.needsCode)
+      };
+    }));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.get('/api/bots/:id/logs', (req, res) => {
-  const { id }  = req.params;
-  const bots    = loadBots();
-  if (!bots[id]) return res.status(404).json({ error: 'Bot not found' });
-  const log = commandLogs.get(id) || [];
+  const log = commandLogs.get(req.params.id) || [];
   res.json([...log].reverse());
 });
 
@@ -445,30 +403,38 @@ app.post('/api/bots', async (req, res) => {
     const rawPhone = phone.replace(/\D/g, '');
     if (rawPhone.length < 10) return res.status(400).json({ error: 'Phone number too short — include country code' });
 
-    const id   = 'bot_' + Date.now();
-    const bots = loadBots();
+    const botId = 'bot_' + Date.now();
 
+    // Store avatar on disk if provided (best-effort; ephemeral but non-critical)
     let avatarPath = null;
     if (avatar?.startsWith('data:image')) {
       const m = avatar.match(/^data:image\/([a-zA-Z]+);base64,(.+)$/);
       if (m) {
-        const ext = m[1] === 'jpeg' ? 'jpg' : m[1];
-        const fn  = `${id}.${ext}`;
-        fs.writeFileSync(path.join(AVATARS_DIR, fn), Buffer.from(m[2], 'base64'));
+        const ext     = m[1] === 'jpeg' ? 'jpg' : m[1];
+        const fn      = `${botId}.${ext}`;
+        const dir     = path.join(__dirname, 'public', 'bot-avatars');
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(path.join(dir, fn), Buffer.from(m[2], 'base64'));
         avatarPath = `/bot-avatars/${fn}`;
       }
     }
 
-    bots[id] = { name: name.trim(), phone: rawPhone, avatarPath, createdAt: new Date().toISOString() };
-    saveBots(bots);
+    await BotConfig.create({
+      botId,
+      name: name.trim(),
+      phone: rawPhone,
+      avatarPath,
+      createdAt: new Date().toISOString(),
+    });
 
-    await startBot(id);
+    await startBot(botId);
 
-    const inst    = botInstances.get(id);
-    const pairing = pairingStore.get(id);
+    const inst    = botInstances.get(botId);
+    const pairing = pairingStore.get(botId);
 
     res.json({
-      id, ...bots[id],
+      id: botId, name: name.trim(), phone: rawPhone, avatarPath,
+      createdAt:   new Date().toISOString(),
       status:      inst?.status || 'connecting',
       pairingCode: pairing?.code || null,
       needsCode:   !!(inst?.needsCode),
@@ -482,13 +448,14 @@ app.post('/api/bots', async (req, res) => {
 
 app.post('/api/bots/:id/request-code', async (req, res) => {
   const { id } = req.params;
-  const bots   = loadBots();
-  if (!bots[id]) return res.status(404).json({ error: 'Bot not found' });
+  const bot    = await BotConfig.findOne({ botId: id }).lean();
+  if (!bot) return res.status(404).json({ error: 'Bot not found' });
 
   killBot(id);
 
-  const sessionDir = path.join(SESSIONS_DIR, id);
-  if (fs.existsSync(sessionDir)) fs.rmSync(sessionDir, { recursive: true, force: true });
+  // Clear the session so a fresh pairing can occur
+  const BotSession = require('./src/models/BotSession');
+  await BotSession.deleteMany({ botId: id }).catch(() => {});
 
   try {
     await startBot(id);
@@ -503,26 +470,30 @@ app.post('/api/bots/:id/request-code', async (req, res) => {
   }
 });
 
-app.delete('/api/bots/:id', (req, res) => {
+app.delete('/api/bots/:id', async (req, res) => {
   const { id } = req.params;
   killBot(id);
   commandLogs.delete(id);
-  const bots = loadBots();
-  if (bots[id]?.avatarPath) {
-    const p = path.join(__dirname, 'public', bots[id].avatarPath);
+
+  const bot = await BotConfig.findOne({ botId: id }).lean();
+  if (bot?.avatarPath) {
+    const p = path.join(__dirname, 'public', bot.avatarPath);
     if (fs.existsSync(p)) fs.unlinkSync(p);
   }
-  delete bots[id];
-  saveBots(bots);
-  const sd = path.join(SESSIONS_DIR, id);
-  if (fs.existsSync(sd)) fs.rmSync(sd, { recursive: true, force: true });
+
+  await BotConfig.deleteOne({ botId: id });
+
+  const BotSession = require('./src/models/BotSession');
+  await BotSession.deleteMany({ botId: id }).catch(() => {});
+
   res.json({ success: true });
 });
 
 app.post('/api/bots/:id/restart', async (req, res) => {
   const { id } = req.params;
-  const bots   = loadBots();
-  if (!bots[id]) return res.status(404).json({ error: 'Bot not found' });
+  const bot    = await BotConfig.findOne({ botId: id }).lean();
+  if (!bot) return res.status(404).json({ error: 'Bot not found' });
+
   killBot(id);
   try {
     await startBot(id);
@@ -534,7 +505,6 @@ app.post('/api/bots/:id/restart', async (req, res) => {
   }
 });
 
-// ── Catch-all: serve Bot Manager UI ──────────────────────────────────────────
 app.get('*', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
@@ -543,12 +513,11 @@ app.get('*', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.h
 
   app.listen(PORT, () => console.log(`\n🌊  Aqua Bot Manager → http://localhost:${PORT}\n`));
 
-  const bots = loadBots();
-  const ids  = Object.keys(bots);
-  if (!ids.length) return;
-  console.log(`Auto-starting ${ids.length} bot(s)…`);
-  for (const id of ids) {
-    try { await startBot(id); } catch (e) { console.error(`  ✗ ${id}:`, e.message); }
+  const bots = await BotConfig.find().lean();
+  if (!bots.length) return;
+  console.log(`Auto-starting ${bots.length} bot(s)…`);
+  for (const bot of bots) {
+    try { await startBot(bot.botId); } catch (e) { console.error(`  ✗ ${bot.botId}:`, e.message); }
     await new Promise(r => setTimeout(r, 500));
   }
 })();
