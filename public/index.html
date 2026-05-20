@@ -12,7 +12,7 @@
   --ff:'Poppins',sans-serif;
   --radius-sm:10px;--radius-md:16px;--radius-lg:24px;--radius-xl:32px;
   --green:#25D366;--green-d:#1db954;--green-glow:rgba(37,211,102,.25);
-  --yellow:#f5a623;--red:#ff4d4d;
+  --yellow:#f5a623;--red:#ff4d4d;--blue:#4f9cf9;
   --trans:.22s cubic-bezier(.4,0,.2,1);
 }
 [data-theme="dark"]{
@@ -51,6 +51,8 @@ header{position:sticky;top:0;z-index:100;background:var(--bg);border-bottom:1px 
 .btn-danger:not(:disabled):hover{background:rgba(255,77,77,.2)}
 .btn-code{background:rgba(37,211,102,.1);color:var(--green);border:1px solid rgba(37,211,102,.25);}
 .btn-code:not(:disabled):hover{background:rgba(37,211,102,.2)}
+.btn-log{background:rgba(79,156,249,.1);color:var(--blue);border:1px solid rgba(79,156,249,.25);}
+.btn-log:not(:disabled):hover{background:rgba(79,156,249,.2)}
 .btn-sm{padding:6px 13px;font-size:.76rem}
 .btn-icon{width:38px;height:38px;padding:0;border-radius:12px;background:var(--surface);border:1px solid var(--border);color:var(--text-2);font-size:17px;display:grid;place-items:center;cursor:pointer;transition:all var(--trans);}
 .btn-icon:hover{background:var(--card-hover);color:var(--text);border-color:var(--border-s)}
@@ -100,8 +102,8 @@ header{position:sticky;top:0;z-index:100;background:var(--bg);border-bottom:1px 
 .get-code-block{background:rgba(245,166,35,.06);border:1px dashed rgba(245,166,35,.3);border-radius:var(--radius-md);padding:14px 16px;display:flex;align-items:center;justify-content:space-between;gap:12px;animation:fadeIn .3s ease;}
 .get-code-text{font-size:.8rem;color:var(--text-2);line-height:1.45}
 .get-code-text strong{color:var(--yellow);display:block;margin-bottom:2px}
-.card-actions{display:flex;gap:8px;margin-top:auto}
-.card-actions .btn{flex:1;justify-content:center}
+.card-actions{display:flex;gap:8px;margin-top:auto;flex-wrap:wrap}
+.card-actions .btn{flex:1;justify-content:center;min-width:80px}
 /* Empty state */
 .empty-state{grid-column:1/-1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:80px 20px;text-align:center;}
 .empty-icon{width:80px;height:80px;border-radius:var(--radius-xl);background:var(--card);border:1px solid var(--border);display:grid;place-items:center;font-size:36px;color:var(--text-3);}
@@ -142,6 +144,35 @@ header{position:sticky;top:0;z-index:100;background:var(--bg);border-bottom:1px 
 .confirm-card p{text-align:center;font-size:.87rem;color:var(--text-2);line-height:1.55}
 .confirm-actions{display:flex;gap:8px;width:100%}
 .confirm-actions .btn{flex:1;justify-content:center}
+
+/* ── Log Drawer ──────────────────────────────────────────────────────────── */
+.log-drawer{position:fixed;top:0;right:0;bottom:0;z-index:300;width:min(480px,100vw);background:var(--card);border-left:1px solid var(--border-s);display:flex;flex-direction:column;transform:translateX(100%);transition:transform .28s cubic-bezier(.4,0,.2,1);box-shadow:-12px 0 40px rgba(0,0,0,.4);}
+.log-drawer.open{transform:none}
+.log-scrim{position:fixed;inset:0;z-index:299;background:rgba(0,0,0,.45);backdrop-filter:blur(3px);opacity:0;pointer-events:none;transition:opacity .25s ease;}
+.log-scrim.open{opacity:1;pointer-events:all}
+.log-header{display:flex;align-items:center;gap:12px;padding:18px 20px;border-bottom:1px solid var(--border);flex-shrink:0;}
+.log-header-left{flex:1;min-width:0}
+.log-title{font-size:.95rem;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.log-subtitle{font-size:.72rem;color:var(--text-3);margin-top:1px}
+.log-live-dot{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 6px var(--green);animation:pulse 2s infinite;flex-shrink:0;}
+.log-actions{display:flex;align-items:center;gap:8px}
+.log-body{flex:1;overflow-y:auto;padding:12px 16px;display:flex;flex-direction:column;gap:6px;}
+.log-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;height:100%;color:var(--text-3);text-align:center;padding:40px 20px;}
+.log-empty i{font-size:2.2rem;opacity:.4}
+.log-empty p{font-size:.82rem;line-height:1.6;max-width:240px;}
+.log-entry{display:flex;align-items:flex-start;gap:10px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;animation:logIn .2s ease;transition:border var(--trans);}
+.log-entry:hover{border-color:var(--border-s)}
+@keyframes logIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+.log-time{font-size:.68rem;color:var(--text-3);font-variant-numeric:tabular-nums;white-space:nowrap;padding-top:2px;min-width:42px;}
+.log-main{flex:1;min-width:0}
+.log-cmd{font-size:.83rem;font-weight:700;color:var(--blue);font-family:monospace;letter-spacing:.01em;}
+.log-args{font-size:.76rem;color:var(--text-2);margin-left:4px;font-weight:400;}
+.log-meta{display:flex;align-items:center;gap:8px;margin-top:4px;flex-wrap:wrap;}
+.log-sender{font-size:.7rem;color:var(--text-3);display:flex;align-items:center;gap:3px;}
+.log-group-badge{font-size:.66rem;font-weight:600;background:rgba(37,211,102,.1);color:var(--green);border:1px solid rgba(37,211,102,.2);border-radius:99px;padding:1px 7px;}
+.log-footer{padding:12px 16px;border-top:1px solid var(--border);flex-shrink:0;display:flex;align-items:center;justify-content:space-between;}
+.log-count{font-size:.74rem;color:var(--text-3)}
+
 @media(max-width:600px){
   .app{padding:0 12px 60px}
   header{padding:14px 12px}
@@ -151,6 +182,7 @@ header{position:sticky;top:0;z-index:100;background:var(--bg);border-bottom:1px 
   .toast-container{left:12px;right:12px}
   .toast{min-width:0;width:100%}
   .pairing-code{font-size:1.3rem}
+  .log-drawer{width:100vw}
 }
 </style>
 </head>
@@ -183,7 +215,8 @@ header{position:sticky;top:0;z-index:100;background:var(--bg);border-bottom:1px 
     </div>
   </div>
 </div>
-<!-- Modal -->
+
+<!-- Add Bot Modal -->
 <div class="modal-overlay" id="modalOverlay" onclick="closeModalOutside(event)">
   <div class="modal">
     <div class="modal-header">
@@ -217,12 +250,122 @@ header{position:sticky;top:0;z-index:100;background:var(--bg);border-bottom:1px 
     </button>
   </div>
 </div>
+
+<!-- Command Log Drawer -->
+<div class="log-scrim" id="logScrim" onclick="closeLogs()"></div>
+<div class="log-drawer" id="logDrawer">
+  <div class="log-header">
+    <div class="log-live-dot" id="logLiveDot" style="display:none"></div>
+    <div class="log-header-left">
+      <div class="log-title" id="logTitle">Command Log</div>
+      <div class="log-subtitle" id="logSubtitle">Live · updates every 2s</div>
+    </div>
+    <div class="log-actions">
+      <button class="btn btn-ghost btn-sm" onclick="clearLogs()" title="Clear log"><i class="ri-delete-bin-line"></i> Clear</button>
+      <button class="modal-close" onclick="closeLogs()"><i class="ri-close-line"></i></button>
+    </div>
+  </div>
+  <div class="log-body" id="logBody">
+    <div class="log-empty"><i class="ri-terminal-box-line"></i><p>Waiting for commands…<br>Commands sent to the bot will appear here in real time.</p></div>
+  </div>
+  <div class="log-footer">
+    <span class="log-count" id="logCount">0 commands recorded</span>
+    <span class="log-count" id="logPollStatus" style="color:var(--green)"></span>
+  </div>
+</div>
+
 <div class="toast-container" id="toastContainer"></div>
 <script>
 let bots = [];
 let avatarBase64 = null;
 const gettingCode = new Set();
 
+// ── Log drawer state ──────────────────────────────────────────────────────────
+let logBotId   = null;
+let logBotName = '';
+let logTimer   = null;
+let logPaused  = false;
+
+function openLogs(id, name) {
+  logBotId   = id;
+  logBotName = name;
+  document.getElementById('logTitle').textContent = name + ' — Commands';
+  document.getElementById('logLiveDot').style.display = 'block';
+  document.getElementById('logScrim').classList.add('open');
+  document.getElementById('logDrawer').classList.add('open');
+  fetchLogs();
+  logTimer = setInterval(fetchLogs, 2000);
+}
+
+function closeLogs() {
+  clearInterval(logTimer);
+  logTimer   = null;
+  logBotId   = null;
+  document.getElementById('logScrim').classList.remove('open');
+  document.getElementById('logDrawer').classList.remove('open');
+  document.getElementById('logLiveDot').style.display = 'none';
+}
+
+async function fetchLogs() {
+  if (!logBotId) return;
+  try {
+    const res  = await fetch(`/api/bots/${logBotId}/logs`);
+    const data = await res.json();
+    if (!res.ok) return;
+    renderLogs(data);
+    document.getElementById('logPollStatus').textContent = '● live';
+  } catch {
+    document.getElementById('logPollStatus').textContent = '○ offline';
+  }
+}
+
+async function clearLogs() {
+  if (!logBotId) return;
+  await fetch(`/api/bots/${logBotId}/logs`, { method: 'DELETE' });
+  renderLogs([]);
+  toast('Log cleared', 'success');
+}
+
+function fmtLogTime(ts) {
+  const d = new Date(ts);
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+}
+
+function renderLogs(entries) {
+  const body = document.getElementById('logBody');
+  document.getElementById('logCount').textContent =
+    entries.length === 0 ? '0 commands recorded'
+    : entries.length === 1 ? '1 command recorded'
+    : `${entries.length} commands recorded`;
+
+  if (!entries.length) {
+    body.innerHTML = `<div class="log-empty"><i class="ri-terminal-box-line"></i><p>Waiting for commands…<br>Commands sent to the bot will appear here in real time.</p></div>`;
+    return;
+  }
+
+  body.innerHTML = entries.map(e => {
+    const groupBadge = e.isGroup
+      ? `<span class="log-group-badge"><i class="ri-group-line"></i> ${e.group || 'group'}</span>`
+      : '';
+    const argsHtml = e.args ? `<span class="log-args">${escHtml(e.args)}</span>` : '';
+    return `<div class="log-entry">
+      <div class="log-time">${fmtLogTime(e.time)}</div>
+      <div class="log-main">
+        <div><span class="log-cmd">.${escHtml(e.command)}</span>${argsHtml}</div>
+        <div class="log-meta">
+          <span class="log-sender"><i class="ri-user-3-line"></i> ${escHtml(e.sender)}</span>
+          ${groupBadge}
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── Theme ─────────────────────────────────────────────────────────────────────
 function toggleTheme(){
   const h=document.documentElement,dark=h.getAttribute('data-theme')==='dark';
   h.setAttribute('data-theme',dark?'light':'dark');
@@ -231,6 +374,7 @@ function toggleTheme(){
 }
 (function(){const s=localStorage.getItem('theme')||'dark';document.documentElement.setAttribute('data-theme',s);document.getElementById('themeIcon').className=s==='dark'?'ri-moon-fill':'ri-sun-fill';})();
 
+// ── Deploy modal ──────────────────────────────────────────────────────────────
 function openModal(){document.getElementById('modalOverlay').classList.add('open');setTimeout(()=>document.getElementById('botName').focus(),100);}
 function closeModal(){document.getElementById('modalOverlay').classList.remove('open');}
 function closeModalOutside(e){if(e.target===document.getElementById('modalOverlay'))closeModal();}
@@ -320,6 +464,7 @@ function confirmDelete(id){
 }
 function cancelDelete(id){document.getElementById('confirm-'+id)?.remove();}
 async function doDelete(id){
+  if(logBotId===id)closeLogs();
   const bot=bots.find(b=>b.id===id);
   try{
     const res=await fetch(`/api/bots/${id}`,{method:'DELETE'});
@@ -393,6 +538,7 @@ function buildCardHTML(bot){
   }
 
   const restartDisabled=(bot.status==='connecting'||bot.status==='reconnecting')?'disabled':'';
+  const isLogsOpen=logBotId===bot.id;
   return`<div class="bot-card ${bot.status}" id="card-${bot.id}">
     <div class="card-top">${avatarHTML}
       <div class="bot-info">
@@ -407,8 +553,9 @@ function buildCardHTML(bot){
       <div class="stat-block"><div class="label"><i class="ri-time-line"></i> Uptime</div><div class="value">${bot.status==='connected'?formatUptime(bot.uptime):'—'}</div></div>
     </div>
     <div class="card-actions">
+      <button class="btn btn-log btn-sm" onclick="openLogs('${bot.id}','${bot.name.replace(/'/g,"\\'")}')"><i class="ri-terminal-box-line"></i> Logs${isLogsOpen?' ●':''}</button>
       <button class="btn btn-ghost btn-sm" onclick="restartBot('${bot.id}')" ${restartDisabled}><i class="ri-refresh-line"></i> Restart</button>
-      <button class="btn btn-danger btn-sm" onclick="confirmDelete('${bot.id}')"><i class="ri-delete-bin-line"></i> Remove</button>
+      <button class="btn btn-danger btn-sm" onclick="confirmDelete('${bot.id}')"><i class="ri-delete-bin-line"></i></button>
     </div>
   </div>`;
 }
@@ -433,7 +580,10 @@ function toast(msg,type='info'){
 }
 
 document.addEventListener('keydown',e=>{
-  if(e.key==='Escape')closeModal();
+  if(e.key==='Escape'){
+    if(document.getElementById('logDrawer').classList.contains('open'))closeLogs();
+    else closeModal();
+  }
   if((e.metaKey||e.ctrlKey)&&e.key==='k'){e.preventDefault();openModal();}
 });
 ['botName','botPhone'].forEach(id=>{
