@@ -6,11 +6,32 @@ const {
   DisconnectReason,
   fetchLatestBaileysVersion,
   makeCacheableSignalKeyStore,
+  isJidBroadcast,
+  isJidGroup,
   Browsers
 } = require('@whiskeysockets/baileys');
 const path = require('path');
 const fs   = require('fs');
 const pino = require('pino');
+
+// ── Bot logic imports (same as index.js) ─────────────────────────────────────
+const { connectDB }        = require('./src/database');
+const config               = require('./src/config');
+const User                 = require('./src/models/User');
+const Group                = require('./src/models/Group');
+
+const { handleGeneral }              = require('./src/commands/general');
+const { handleAdmin }                = require('./src/commands/admin');
+const { handleEconomy }              = require('./src/commands/economy');
+const { handleGambling }             = require('./src/commands/gambling');
+const { handleFun }                  = require('./src/commands/fun');
+const { handleInteractions }         = require('./src/commands/interactions');
+const { handleGames, handleGameAnswer } = require('./src/commands/games');
+const { handlePokemon }              = require('./src/commands/pokemon');
+const { handleDownloader }           = require('./src/commands/downloader');
+const { handleRpg }                  = require('./src/commands/rpg');
+const { handleGuild }                = require('./src/commands/guild');
+const { isOwner }                    = require('./src/utils/helpers');
 
 const app  = express();
 const PORT = process.env.WEB_PORT || process.env.PORT || 3000;
@@ -34,10 +55,22 @@ function loadBots() {
 function saveBots(bots) { fs.writeFileSync(BOTS_FILE, JSON.stringify(bots, null, 2)); }
 
 // ── State ─────────────────────────────────────────────────────────────────────
-const botInstances = new Map(); // id → { sock, status, messages, startTime, registered }
+// id → { sock, status, messages, startTime, registered, needsCode }
+const botInstances = new Map();
 const pairingStore = new Map(); // id → { code, expiresAt }
 
-// ── Core: start a bot (mirrors original index.js exactly) ────────────────────
+// Per-bot circular command log (max 100 entries each)
+const LOG_MAX = 100;
+const commandLogs = new Map(); // id → Array<LogEntry>
+
+function pushLog(botId, entry) {
+  if (!commandLogs.has(botId)) commandLogs.set(botId, []);
+  const log = commandLogs.get(botId);
+  log.push(entry);
+  if (log.length > LOG_MAX) log.shift();
+}
+
+// ── Core: start a bot ─────────────────────────────────────────────────────────
 async function startBot(botId) {
   const bots      = loadBots();
   const botConfig = bots[botId];
@@ -50,22 +83,21 @@ async function startBot(botId) {
   const { version }          = await fetchLatestBaileysVersion();
   const logger               = pino({ level: 'silent' });
 
-  // ── Exact same config as the original index.js ────────────────────────────
   const sock = makeWASocket({
     version,
     logger,
     auth: {
       creds: state.creds,
-      keys:  makeCacheableSignalKeyStore(state.keys, logger)  // ← was missing, causes pairing failure
+      keys:  makeCacheableSignalKeyStore(state.keys, logger)
     },
-    browser:                  Browsers.ubuntu('Chrome'),
-    printQRInTerminal:        false,
+    browser:                        Browsers.ubuntu('Chrome'),
+    printQRInTerminal:              false,
     generateHighQualityLinkPreview: true,
-    defaultQueryTimeoutMs:    60000,
-    connectTimeoutMs:         60000,
-    keepAliveIntervalMs:      10000,
-    retryRequestDelayMs:      250,
-    getMessage:               async () => ({ conversation: '' })
+    defaultQueryTimeoutMs:          60000,
+    connectTimeoutMs:               60000,
+    keepAliveIntervalMs:            10000,
+    retryRequestDelayMs:            250,
+    getMessage:                     async () => ({ conversation: '' })
   });
 
   botInstances.set(botId, {
@@ -73,7 +105,8 @@ async function startBot(botId) {
     status:     'connecting',
     messages:   0,
     startTime:  Date.now(),
-    registered: state.creds.registered
+    registered: state.creds.registered,
+    needsCode:  false
   });
 
   let credsSaved = false;
@@ -85,17 +118,15 @@ async function startBot(botId) {
     if (!inst) return;
 
     if (connection === 'close') {
-      const statusCode      = lastDisconnect?.error?.output?.statusCode;
-      const loggedOut       = statusCode === DisconnectReason.loggedOut;
-      const hadCreds        = inst.registered;
+      const statusCode = lastDisconnect?.error?.output?.statusCode;
+      const loggedOut  = statusCode === DisconnectReason.loggedOut;
+      const hadCreds   = inst.registered;
 
       if (loggedOut) {
         console.log(`[${botConfig.name}] Logged out — clearing session`);
         inst.status = 'disconnected';
-        // Clear session so next start asks for pairing again
         fs.rmSync(sessionDir, { recursive: true, force: true });
       } else if (!hadCreds && !credsSaved) {
-        // Pairing attempt failed — don't reconnect spam
         console.log(`[${botConfig.name}] Pairing connection closed (no creds saved)`);
         inst.status = 'disconnected';
       } else {
@@ -122,14 +153,159 @@ async function startBot(botId) {
     }
   });
 
-  sock.ev.on('messages.upsert', ({ messages: msgs }) => {
+  // ── Full command handling ─────────────────────────────────────────────────
+  sock.ev.on('messages.upsert', async ({ messages: msgs, type }) => {
+    if (type !== 'notify') return;
+
     const inst = botInstances.get(botId);
-    if (inst) inst.messages += msgs.filter(m => !m.key.fromMe).length;
+
+    for (const message of msgs) {
+      try {
+        if (!message.message) continue;
+        if (message.key.fromMe) continue;
+        if (isJidBroadcast(message.key.remoteJid)) continue;
+
+        if (inst) inst.messages += 1;
+
+        const sender   = message.key.participant || message.key.remoteJid;
+        const groupJid = isJidGroup(message.key.remoteJid) ? message.key.remoteJid : null;
+        const isGroup  = !!groupJid;
+        const dest     = isGroup ? groupJid : sender;
+
+        const body =
+          message.message?.conversation ||
+          message.message?.extendedTextMessage?.text ||
+          message.message?.imageMessage?.caption ||
+          message.message?.videoMessage?.caption ||
+          message.message?.buttonsResponseMessage?.selectedButtonId ||
+          message.message?.listResponseMessage?.singleSelectReply?.selectedRowId ||
+          '';
+
+        const prefix    = config.PREFIX;
+        const isCommand = body.startsWith(prefix);
+
+        // Track group member activity
+        if (isGroup) {
+          try {
+            const now     = new Date();
+            const updated = await Group.findOneAndUpdate(
+              { jid: groupJid, 'memberActivity.jid': sender },
+              { $set: { 'memberActivity.$.lastSeen': now }, $inc: { 'memberActivity.$.messageCount': 1 } }
+            );
+            if (!updated) {
+              await Group.findOneAndUpdate(
+                { jid: groupJid },
+                { $push: { memberActivity: { jid: sender, lastSeen: now, messageCount: 1 } } },
+                { upsert: true }
+              );
+            }
+          } catch (_) {}
+        }
+
+        if (!isCommand) {
+          await handleGameAnswer(sock, message, body, sender, isGroup, groupJid);
+
+          if (isGroup) {
+            const group = await Group.findOne({ jid: groupJid });
+            if (group?.antilink && body.match(/https?:\/\/chat\.whatsapp\.com\/[a-zA-Z0-9]+/)) {
+              try {
+                await sock.groupParticipantsUpdate(groupJid, [sender], 'remove');
+                await sock.sendMessage(groupJid, {
+                  text: `⚠️ @${sender.split('@')[0]} was removed for sharing invite links!`,
+                  mentions: [sender]
+                });
+              } catch (_) {
+                await sock.sendMessage(groupJid, {
+                  text: `⚠️ @${sender.split('@')[0]} please don't share links!`,
+                  mentions: [sender]
+                }, { quoted: message });
+              }
+            }
+          }
+          continue;
+        }
+
+        const args    = body.slice(prefix.length).trim().split(/\s+/);
+        const command = args.shift().toLowerCase();
+
+        // ── Log the command ───────────────────────────────────────────────
+        pushLog(botId, {
+          time:    Date.now(),
+          sender:  sender.split('@')[0],
+          command,
+          args:    args.join(' '),
+          isGroup,
+          group:   groupJid ? groupJid.split('@')[0] : null
+        });
+
+        let user = await User.findOne({ jid: sender });
+        if (!user) {
+          user = new User({ jid: sender, name: message.pushName || sender.split('@')[0] });
+          await user.save();
+        } else if (user.name !== message.pushName && message.pushName) {
+          user.name = message.pushName;
+          await user.save();
+        }
+
+        if (user.banned && !isOwner(sender)) {
+          await sock.sendMessage(dest, { text: '*🚫 Access Denied*' }, { quoted: message });
+          continue;
+        }
+
+        if (isGroup) {
+          const group = await Group.findOne({ jid: groupJid });
+          if (group && !group.active && !isOwner(sender)) continue;
+          if (group?.mutedMembers?.includes(sender)) continue;
+        }
+
+        let handled = false;
+
+        handled = await handleGeneral(sock, message, command, args, sender, isGroup, groupJid);
+        if (!handled) handled = await handleAdmin(sock, message, command, args, sender, isGroup, groupJid);
+        if (!handled) handled = await handleEconomy(sock, message, command, args, sender, isGroup, groupJid);
+        if (!handled) handled = await handleGambling(sock, message, command, args, sender, isGroup, groupJid);
+        if (!handled) handled = await handleFun(sock, message, command, args, sender, isGroup, groupJid);
+        if (!handled) handled = await handleInteractions(sock, message, command, args, sender, isGroup, groupJid);
+        if (!handled) handled = await handleGames(sock, message, command, args, sender, isGroup, groupJid);
+        if (!handled) handled = await handlePokemon(sock, message, command, args, sender, isGroup, groupJid);
+        if (!handled) handled = await handleDownloader(sock, message, command, args, sender, isGroup, groupJid);
+        if (!handled) handled = await handleRpg(sock, message, command, args, sender, isGroup, groupJid);
+        if (!handled) handled = await handleGuild(sock, message, command, args, sender, isGroup, groupJid);
+
+      } catch (err) {
+        console.error(`[${botConfig.name}] ⚠️ Error handling message:`, err.message);
+      }
+    }
   });
 
-  // ── Request pairing code (mirrors original tryPair with retries) ──────────
+  // ── Welcome / goodbye messages ────────────────────────────────────────────
+  sock.ev.on('group-participants.update', async ({ id, participants, action }) => {
+    try {
+      const group = await Group.findOne({ jid: id });
+      if (!group) return;
+
+      for (const participant of participants) {
+        if (action === 'add' && group.welcome) {
+          await sock.sendMessage(id, {
+            text: `👋 Welcome to the group, @${participant.split('@')[0]}!\n\n🎉 We're happy to have you here!\nType *.menu* to see what I can do!`,
+            mentions: [participant]
+          });
+        }
+        if (action === 'remove' && group.goodbye) {
+          await sock.sendMessage(id, {
+            text: `👋 Goodbye @${participant.split('@')[0]}! We'll miss you!`,
+            mentions: [participant]
+          });
+        }
+      }
+    } catch (err) {
+      console.error(`[${botConfig.name}] Group update error:`, err.message);
+    }
+  });
+
+  // ── Request pairing code ──────────────────────────────────────────────────
   if (!state.creds.registered) {
-    await new Promise(r => setTimeout(r, 1500)); // let WS handshake settle — exact same delay as original
+    await new Promise(r => setTimeout(r, 1500));
 
     const phone = botConfig.phone.replace(/\D/g, '');
     console.log(`[${botConfig.name}] Requesting pairing code for +${phone}…`);
@@ -137,7 +313,7 @@ async function startBot(botId) {
     const tryPair = async (attemptsLeft) => {
       try {
         const raw  = await sock.requestPairingCode(phone);
-        const code = raw.match(/.{1,4}/g).join('-'); // format as XXXX-XXXX
+        const code = raw.match(/.{1,4}/g).join('-');
         pairingStore.set(botId, { code, expiresAt: Date.now() + 5 * 60 * 1000 });
         const inst = botInstances.get(botId);
         if (inst) inst.needsCode = false;
@@ -155,7 +331,7 @@ async function startBot(botId) {
       }
     };
 
-    await tryPair(4); // 4 retries — same as original
+    await tryPair(4);
   }
 }
 
@@ -189,6 +365,21 @@ app.get('/api/bots', (_req, res) => {
   }));
 });
 
+// ── Command log endpoint ──────────────────────────────────────────────────────
+app.get('/api/bots/:id/logs', (req, res) => {
+  const { id }  = req.params;
+  const bots    = loadBots();
+  if (!bots[id]) return res.status(404).json({ error: 'Bot not found' });
+  const log = commandLogs.get(id) || [];
+  // Return newest-first
+  res.json([...log].reverse());
+});
+
+app.delete('/api/bots/:id/logs', (req, res) => {
+  commandLogs.set(req.params.id, []);
+  res.json({ success: true });
+});
+
 app.post('/api/bots', async (req, res) => {
   try {
     const { phone, name, avatar } = req.body;
@@ -214,7 +405,7 @@ app.post('/api/bots', async (req, res) => {
     bots[id] = { name: name.trim(), phone: rawPhone, avatarPath, createdAt: new Date().toISOString() };
     saveBots(bots);
 
-    await startBot(id); // waits for pairing code (up to 4 retries internally)
+    await startBot(id);
 
     const inst    = botInstances.get(id);
     const pairing = pairingStore.get(id);
@@ -232,7 +423,6 @@ app.post('/api/bots', async (req, res) => {
   }
 });
 
-// Fresh socket + new pairing code request
 app.post('/api/bots/:id/request-code', async (req, res) => {
   const { id } = req.params;
   const bots   = loadBots();
@@ -240,7 +430,6 @@ app.post('/api/bots/:id/request-code', async (req, res) => {
 
   killBot(id);
 
-  // Clear session so Baileys treats it as a completely fresh registration
   const sessionDir = path.join(SESSIONS_DIR, id);
   if (fs.existsSync(sessionDir)) fs.rmSync(sessionDir, { recursive: true, force: true });
 
@@ -260,6 +449,7 @@ app.post('/api/bots/:id/request-code', async (req, res) => {
 app.delete('/api/bots/:id', (req, res) => {
   const { id } = req.params;
   killBot(id);
+  commandLogs.delete(id);
   const bots = loadBots();
   if (bots[id]?.avatarPath) {
     const p = path.join(__dirname, 'public', bots[id].avatarPath);
@@ -290,9 +480,11 @@ app.post('/api/bots/:id/restart', async (req, res) => {
 app.get('*', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
-app.listen(PORT, () => console.log(`\n🌊  Aqua Bot Manager → http://localhost:${PORT}\n`));
-
 (async () => {
+  await connectDB();
+
+  app.listen(PORT, () => console.log(`\n🌊  Aqua Bot Manager → http://localhost:${PORT}\n`));
+
   const bots = loadBots();
   const ids  = Object.keys(bots);
   if (!ids.length) return;
