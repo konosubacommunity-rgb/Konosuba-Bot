@@ -4,7 +4,8 @@ const {
   makeWASocket,
   useMultiFileAuthState,
   DisconnectReason,
-  fetchLatestBaileysVersion
+  fetchLatestBaileysVersion,
+  Browsers
 } = require('@whiskeysockets/baileys');
 const path = require('path');
 const fs   = require('fs');
@@ -12,12 +13,12 @@ const { Boom } = require('@hapi/boom');
 const pino = require('pino');
 
 const app  = express();
-const PORT = process.env.WEB_PORT || 3000;
+const PORT = process.env.WEB_PORT || process.env.PORT || 3000;
 
 app.use(express.json({ limit: '15mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
-// ── Storage dirs ──────────────────────────────────────────────────────────────
+// ── Storage ───────────────────────────────────────────────────────────────────
 const BOTS_FILE    = path.join(__dirname, 'bots.json');
 const SESSIONS_DIR = path.join(__dirname, 'bot-sessions');
 const AVATARS_DIR  = path.join(__dirname, 'public', 'bot-avatars');
@@ -30,48 +31,33 @@ function loadBots() {
   if (!fs.existsSync(BOTS_FILE)) return {};
   try { return JSON.parse(fs.readFileSync(BOTS_FILE, 'utf8')); } catch { return {}; }
 }
-function saveBots(bots) {
-  fs.writeFileSync(BOTS_FILE, JSON.stringify(bots, null, 2));
-}
+function saveBots(bots) { fs.writeFileSync(BOTS_FILE, JSON.stringify(bots, null, 2)); }
 
-// ── In-memory state ───────────────────────────────────────────────────────────
+// ── State ─────────────────────────────────────────────────────────────────────
 const botInstances = new Map(); // id → { sock, status, messages, startTime, registered }
 const pairingStore = new Map(); // id → { code, expiresAt }
 
-// ── Helper: request pairing code on an existing socket ───────────────────────
-async function requestCode(botId) {
-  const bots   = loadBots();
-  const config = bots[botId];
-  const inst   = botInstances.get(botId);
-  if (!config || !inst?.sock) throw new Error('Bot socket not ready');
-
-  const phone = config.phone.replace(/\D/g, '');
-  console.log(`[${config.name}] Requesting pairing code for ${phone}…`);
-  const code = await inst.sock.requestPairingCode(phone);
-  pairingStore.set(botId, { code, expiresAt: Date.now() + 5 * 60 * 1000 });
-  console.log(`[${config.name}] Pairing code: ${code}`);
-  return code;
-}
-
-// ── Start / connect a bot ─────────────────────────────────────────────────────
+// ── Core: create a fresh socket and get pairing code ──────────────────────────
 async function startBot(botId) {
   const bots      = loadBots();
   const botConfig = bots[botId];
-  if (!botConfig) throw new Error('Bot not found in config');
+  if (!botConfig) throw new Error('Bot config not found');
 
   const sessionDir = path.join(SESSIONS_DIR, botId);
-  if (!fs.existsSync(sessionDir)) fs.mkdirSync(sessionDir, { recursive: true });
+  fs.mkdirSync(sessionDir, { recursive: true });
 
   const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
   const { version }          = await fetchLatestBaileysVersion();
 
   const sock = makeWASocket({
     version,
-    auth: state,
+    auth:              state,
     printQRInTerminal: false,
-    logger: pino({ level: 'silent' }),
-    browser: [botConfig.name || 'AquaBot', 'Chrome', '3.0'],
-    mobile: false
+    logger:            pino({ level: 'silent' }),
+    browser:           Browsers.ubuntu('Desktop'),
+    mobile:            false,
+    syncFullHistory:   false,
+    markOnlineOnConnect: false
   });
 
   botInstances.set(botId, {
@@ -82,30 +68,32 @@ async function startBot(botId) {
     registered: state.creds.registered
   });
 
+  // ─── CRITICAL: call requestPairingCode RIGHT HERE, no delay ───────────────
+  // Baileys internally queues this until the WS handshake completes.
+  // Calling it AFTER a delay or inside connection.update is too late.
+  if (!state.creds.registered) {
+    const phone = botConfig.phone.replace(/\D/g, ''); // digits only, no +
+    console.log(`[${botConfig.name}] Requesting pairing code for ${phone}…`);
+    try {
+      const code = await sock.requestPairingCode(phone);
+      pairingStore.set(botId, { code, expiresAt: Date.now() + 5 * 60 * 1000 });
+      console.log(`[${botConfig.name}] ✓ Pairing code: ${code}`);
+      const inst = botInstances.get(botId);
+      if (inst) inst.needsCode = false;
+    } catch (err) {
+      console.error(`[${botConfig.name}] ✗ Pairing code error: ${err.message}`);
+      const inst = botInstances.get(botId);
+      if (inst) inst.needsCode = true;
+    }
+  }
+
+  // ─── Event handlers AFTER pairing code request ───────────────────────────
   sock.ev.on('creds.update', saveCreds);
 
   sock.ev.on('connection.update', async update => {
-    const { connection, lastDisconnect, isNewLogin } = update;
+    const { connection, lastDisconnect } = update;
     const inst = botInstances.get(botId);
     if (!inst) return;
-
-    // ── QR/pairing phase: Baileys signals "connecting" then goes quiet
-    // Request pairing code once the socket has reached the WA servers
-    // (indicated by receivedPendingNotifications or simply after a short delay)
-    if (connection === 'connecting' && !inst.registered && !pairingStore.has(botId)) {
-      // Give Baileys 2 s to complete the initial WS handshake before asking for code
-      setTimeout(async () => {
-        const current = botInstances.get(botId);
-        if (!current || current.registered || pairingStore.has(botId)) return;
-        try {
-          await requestCode(botId);
-        } catch (err) {
-          console.error(`[${botConfig.name}] Auto pairing code failed:`, err.message);
-          // Mark as needsCode so the frontend shows the Get Code button
-          current.needsCode = true;
-        }
-      }, 2000);
-    }
 
     if (connection === 'close') {
       const statusCode      = new Boom(lastDisconnect?.error)?.output?.statusCode;
@@ -114,7 +102,9 @@ async function startBot(botId) {
 
       if (shouldReconnect) {
         console.log(`[${botConfig.name}] Reconnecting in 5 s…`);
-        setTimeout(() => startBot(botId).catch(console.error), 5000);
+        setTimeout(() => startBot(botId).catch(e => console.error(e.message)), 5000);
+      } else {
+        console.log(`[${botConfig.name}] Logged out.`);
       }
     } else if (connection === 'open') {
       inst.status     = 'connected';
@@ -122,7 +112,7 @@ async function startBot(botId) {
       inst.registered = true;
       inst.needsCode  = false;
       pairingStore.delete(botId);
-      console.log(`[${botConfig.name}] ✓ Connected`);
+      console.log(`[${botConfig.name}] ✓ Connected!`);
 
       const fresh = loadBots()[botId];
       if (fresh?.avatarPath) {
@@ -131,9 +121,7 @@ async function startBot(botId) {
           sock.updateProfilePicture(sock.user.id, fs.readFileSync(imgPath)).catch(() => {});
         }
       }
-      if (fresh?.name) {
-        sock.updateProfileName(fresh.name).catch(() => {});
-      }
+      if (fresh?.name) sock.updateProfileName(fresh.name).catch(() => {});
     }
   });
 
@@ -141,6 +129,16 @@ async function startBot(botId) {
     const inst = botInstances.get(botId);
     if (inst) inst.messages += msgs.filter(m => !m.key.fromMe).length;
   });
+
+  return sock;
+}
+
+// ─── Helper: cleanly kill a bot's socket ─────────────────────────────────────
+function killBot(botId) {
+  const inst = botInstances.get(botId);
+  if (inst?.sock) { try { inst.sock.end(new Error('killed')); } catch {} }
+  botInstances.delete(botId);
+  pairingStore.delete(botId);
 }
 
 // ── REST API ──────────────────────────────────────────────────────────────────
@@ -161,62 +159,50 @@ app.get('/api/bots', (_req, res) => {
       messages:    inst?.messages || 0,
       uptime:      inst?.startTime ? Date.now() - inst.startTime : 0,
       pairingCode: pairing && pairing.expiresAt > Date.now() ? pairing.code : null,
-      needsCode:   inst?.needsCode || false
+      needsCode:   !!(inst?.needsCode)
     };
   });
   res.json(list);
 });
 
-// POST /api/bots  – add new bot
+// POST /api/bots — add new bot
 app.post('/api/bots', async (req, res) => {
   try {
     const { phone, name, avatar } = req.body;
     if (!phone || !name) return res.status(400).json({ error: 'phone and name are required' });
 
+    const rawPhone = phone.replace(/\D/g, '');
+    if (rawPhone.length < 10) return res.status(400).json({ error: 'Phone number too short' });
+
     const id   = 'bot_' + Date.now();
     const bots = loadBots();
 
     let avatarPath = null;
-    if (avatar && avatar.startsWith('data:image')) {
+    if (avatar?.startsWith('data:image')) {
       const m = avatar.match(/^data:image\/([a-zA-Z]+);base64,(.+)$/);
       if (m) {
-        const ext      = m[1] === 'jpeg' ? 'jpg' : m[1];
-        const filename = `${id}.${ext}`;
-        fs.writeFileSync(path.join(AVATARS_DIR, filename), Buffer.from(m[2], 'base64'));
-        avatarPath = `/bot-avatars/${filename}`;
+        const ext = m[1] === 'jpeg' ? 'jpg' : m[1];
+        const fn  = `${id}.${ext}`;
+        fs.writeFileSync(path.join(AVATARS_DIR, fn), Buffer.from(m[2], 'base64'));
+        avatarPath = `/bot-avatars/${fn}`;
       }
     }
 
-    bots[id] = {
-      name:      name.trim(),
-      phone:     phone.replace(/[^0-9+]/g, ''),
-      avatarPath,
-      createdAt: new Date().toISOString()
-    };
+    bots[id] = { name: name.trim(), phone: rawPhone, avatarPath, createdAt: new Date().toISOString() };
     saveBots(bots);
 
-    // Start the socket — pairing code comes async via connection.update
+    // startBot awaits requestPairingCode internally — code is ready when it returns
     await startBot(id);
-
-    // Wait up to 8 s for the pairing code to arrive
-    let waited = 0;
-    while (waited < 8000) {
-      await new Promise(r => setTimeout(r, 500));
-      waited += 500;
-      if (pairingStore.has(id)) break;
-    }
 
     const inst    = botInstances.get(id);
     const pairing = pairingStore.get(id);
 
     res.json({
-      id,
-      ...bots[id],
+      id, ...bots[id],
       status:      inst?.status || 'connecting',
       pairingCode: pairing?.code || null,
-      needsCode:   inst?.needsCode || false,
-      messages:    0,
-      uptime:      0
+      needsCode:   !!(inst?.needsCode),
+      messages: 0, uptime: 0
     });
   } catch (err) {
     console.error('Add bot error:', err);
@@ -224,20 +210,30 @@ app.post('/api/bots', async (req, res) => {
   }
 });
 
-// POST /api/bots/:id/request-code  – manually get/refresh pairing code
+// POST /api/bots/:id/request-code — fresh socket + immediate code request
 app.post('/api/bots/:id/request-code', async (req, res) => {
   const { id } = req.params;
   const bots   = loadBots();
   if (!bots[id]) return res.status(404).json({ error: 'Bot not found' });
 
-  const inst = botInstances.get(id);
-  if (!inst?.sock) return res.status(400).json({ error: 'Bot socket not running. Try restarting first.' });
-  if (inst.registered) return res.status(400).json({ error: 'Bot is already paired.' });
+  // Kill existing socket
+  killBot(id);
+
+  // Clear any stale session files so Baileys treats it as a fresh registration
+  const sessionDir = path.join(SESSIONS_DIR, id);
+  if (fs.existsSync(sessionDir)) fs.rmSync(sessionDir, { recursive: true });
 
   try {
-    const code = await requestCode(id);
-    inst.needsCode = false;
-    res.json({ code });
+    await startBot(id);
+    const pairing = pairingStore.get(id);
+    if (!pairing) {
+      const inst = botInstances.get(id);
+      const hint = inst?.needsCode
+        ? 'Baileys could not generate a code. Check that the phone number is correct and includes the country code (no +).'
+        : 'Pairing code not received yet — please try again.';
+      return res.status(500).json({ error: hint });
+    }
+    res.json({ code: pairing.code });
   } catch (err) {
     console.error('Request code error:', err);
     res.status(500).json({ error: err.message });
@@ -247,11 +243,7 @@ app.post('/api/bots/:id/request-code', async (req, res) => {
 // DELETE /api/bots/:id
 app.delete('/api/bots/:id', (req, res) => {
   const { id } = req.params;
-  const inst   = botInstances.get(id);
-  if (inst?.sock) { try { inst.sock.end(); } catch {} }
-  botInstances.delete(id);
-  pairingStore.delete(id);
-
+  killBot(id);
   const bots = loadBots();
   if (bots[id]?.avatarPath) {
     const p = path.join(__dirname, 'public', bots[id].avatarPath);
@@ -259,10 +251,8 @@ app.delete('/api/bots/:id', (req, res) => {
   }
   delete bots[id];
   saveBots(bots);
-
-  const sessionDir = path.join(SESSIONS_DIR, id);
-  if (fs.existsSync(sessionDir)) fs.rmSync(sessionDir, { recursive: true });
-
+  const sd = path.join(SESSIONS_DIR, id);
+  if (fs.existsSync(sd)) fs.rmSync(sd, { recursive: true });
   res.json({ success: true });
 });
 
@@ -271,41 +261,22 @@ app.post('/api/bots/:id/restart', async (req, res) => {
   const { id } = req.params;
   const bots   = loadBots();
   if (!bots[id]) return res.status(404).json({ error: 'Bot not found' });
-
-  const inst = botInstances.get(id);
-  if (inst?.sock) { try { inst.sock.end(); } catch {} }
-  botInstances.delete(id);
-  pairingStore.delete(id);
-
+  killBot(id);
   try {
     await startBot(id);
-    // Wait up to 8 s for code
-    let waited = 0;
-    while (waited < 8000) {
-      await new Promise(r => setTimeout(r, 500));
-      waited += 500;
-      if (pairingStore.has(id)) break;
-    }
-    const newInst = botInstances.get(id);
+    const inst    = botInstances.get(id);
     const pairing = pairingStore.get(id);
-    res.json({
-      success:     true,
-      status:      newInst?.status || 'connecting',
-      pairingCode: pairing?.code || null,
-      needsCode:   newInst?.needsCode || false
-    });
+    res.json({ success: true, status: inst?.status || 'connecting', pairingCode: pairing?.code || null });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// Catch-all → SPA
+// SPA fallback
 app.get('*', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
-// ── Boot ──────────────────────────────────────────────────────────────────────
-app.listen(PORT, () => {
-  console.log(`\n🌊  Aqua Bot Manager  →  http://localhost:${PORT}\n`);
-});
+// ── Start ──────────────────────────────────────────────────────────────────────
+app.listen(PORT, () => console.log(`\n🌊  Aqua Bot Manager → http://localhost:${PORT}\n`));
 
 (async () => {
   const bots = loadBots();
@@ -314,6 +285,6 @@ app.listen(PORT, () => {
   console.log(`Auto-starting ${ids.length} bot(s)…`);
   for (const id of ids) {
     try { await startBot(id); } catch (e) { console.error(`  ✗ ${id}:`, e.message); }
-    await new Promise(r => setTimeout(r, 800));
+    await new Promise(r => setTimeout(r, 500));
   }
 })();
