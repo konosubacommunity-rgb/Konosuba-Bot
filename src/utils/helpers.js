@@ -27,11 +27,24 @@ function getXpForLevel(level) {
   return level * 100;
 }
 
+/**
+ * Check if a JID belongs to one of the owner numbers
+ * @param {string} jid - The JID to check (e.g., "12232838631673@s.whatsapp.net")
+ * @returns {boolean}
+ */
 function isOwner(jid) {
-  const clean = jid.split('@')[0];
-  return jid === config.OWNER_JID || clean === config.OWNER_NUMBER;
+  if (!jid) return false;
+  
+  // Extract just the phone number from JID
+  const phoneFromJid = jid.split('@')[0];
+  
+  // Check against all configured owner numbers
+  return config.OWNER_NUMBERS.includes(phoneFromJid);
 }
 
+/**
+ * Alias for isOwner
+ */
 function isOwnerJid(jid) {
   return isOwner(jid);
 }

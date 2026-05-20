@@ -1,10 +1,23 @@
+// Support multiple WhatsApp numbers hosting the same bot instance
+const ownerNumbersEnv = process.env.OWNER_NUMBERS || '12232838631673';
+const ownerNumbersList = ownerNumbersEnv
+  .split(',')
+  .map(n => n.trim())
+  .filter(Boolean);
+
 module.exports = {
-  OWNER_JID: '12232838631673@lid',
-  OWNER_NUMBER: '12232838631673',
+  // Array of all approved owner/admin numbers
+  OWNER_NUMBERS: ownerNumbersList,
+  OWNER_JID: ownerNumbersList.length > 0 ? `${ownerNumbersList[0]}@lid` : '12232838631673@lid',
+  
   BOT_NAME: 'Aqua',
   COMMUNITY: 'KONOSUBA',
   PREFIX: '.',
-  MONGO_URI: 'mongodb+srv://konosubacommunity1:kono%2Esuba001@cluster-kono.41yglcv.mongodb.net/?appName=Cluster-kono',
+  
+  // MongoDB connection
+  MONGO_URI: process.env.MONGO_URI || 'mongodb+srv://konosubacommunity1:kono%2Esuba001@cluster-kono.41yglcv.mongodb.net/?appName=Cluster-kono',
+  
+  // Cooldowns (in milliseconds)
   COOLDOWNS: {
     daily: 24 * 60 * 60 * 1000,
     weekly: 7 * 24 * 60 * 60 * 1000,
@@ -30,6 +43,8 @@ module.exports = {
     highlow: 30 * 1000,
     crash: 90 * 1000,
   },
+  
+  // Economy settings
   ECONOMY: {
     DAILY_AMOUNT: () => Math.floor(Math.random() * 500) + 100,
     WEEKLY_AMOUNT: () => Math.floor(Math.random() * 3000) + 500,
@@ -44,5 +59,7 @@ module.exports = {
     BANK_UPGRADE_AMOUNT: 5000,
     WIN_RATE: 0.30,
   },
+  
+  // Menu image
   MENU_IMAGE: './assets/menu.jpg',
 };
