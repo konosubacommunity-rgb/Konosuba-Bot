@@ -5,8 +5,8 @@ const router = express.Router();
 const User = require('../models/User');
 const jwt = require('jsonwebtoken');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'your_secret_key_change_this';
-const BOT_SECRET = process.env.BOT_WEBHOOK_SECRET || 'your_bot_secret';
+const JWT_SECRET = process.env.JWT_SECRET || 'akjdhakjdhakjdh1234567890987654321abc123456789';
+const BOT_SECRET = process.env.BOT_WEBHOOK_SECRET || 'ajkhdjkahdjkah9876543210123456789defghijk123';
 
 // Middleware
 function verifyBotSecret(req, res, next) {
