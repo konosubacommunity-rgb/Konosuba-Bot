@@ -1,7 +1,10 @@
 const mongoose = require('mongoose');
 
 const userSchema = new mongoose.Schema({
-  jid: { type: String, required: true, unique: true },
+  // PRIMARY IDENTIFIERS - Both JID and LID are stored to handle WhatsApp's addressing modes
+  jid: { type: String, required: true, unique: true, sparse: true },  // phone@s.whatsapp.net
+  lid: { type: String, unique: true, sparse: true },                  // xxx@lid (WhatsApp v6+)
+  
   name: { type: String, default: 'Unknown' },
   username: String,
   password: String,
@@ -89,13 +92,76 @@ const userSchema = new mongoose.Schema({
   }],
 
   isMod: { type: Boolean, default: false },
+  isAdmin: { type: Boolean, default: false },
 
 }, { timestamps: true });
 
+// ── INDEXES ────────────────────────────────────────────────────────────
+// Index both JID and LID for fast lookups in either addressing mode
+userSchema.index({ jid: 1 }, { sparse: true });
+userSchema.index({ lid: 1 }, { sparse: true });
+// Index for quick discovery of registered users
+userSchema.index({ registered: 1, createdAt: -1 });
+
+// ── VIRTUAL GETTERS ────────────────────────────────────────────────────
 userSchema.virtual('netWorth').get(function () {
   return this.wallet + this.bank;
 });
 
+// Return the phone number extracted from JID (removes @s.whatsapp.net suffix)
+userSchema.virtual('phone').get(function () {
+  if (this.jid && this.jid.includes('@')) {
+    return this.jid.split('@')[0];
+  }
+  return null;
+});
+
+// ── STATICS FOR FINDING BY EITHER JID OR LID ──────────────────────────
+/**
+ * findByWhatsAppId(identifier)
+ * Pass either a JID (phone@s.whatsapp.net) or LID (xxx@lid)
+ * and it will find the matching user document.
+ */
+userSchema.statics.findByWhatsAppId = async function (identifier) {
+  if (!identifier) return null;
+  
+  const isLid = identifier.includes('@lid');
+  const query = isLid ? { lid: identifier } : { jid: identifier };
+  
+  return this.findOne(query);
+};
+
+/**
+ * findOrCreateByJid(jid, phoneNumber)
+ * Creates user if doesn't exist using JID, stores phone for reference
+ */
+userSchema.statics.findOrCreateByJid = async function (jid, phoneNumber) {
+  let user = await this.findOne({ jid });
+  
+  if (!user) {
+    user = new this({
+      jid,
+      name: phoneNumber || jid.split('@')[0],
+    });
+    await user.save();
+  }
+  
+  return user;
+};
+
+/**
+ * linkLid(jid, lid)
+ * When WhatsApp gives us a LID for a user, link it to the existing JID document
+ */
+userSchema.statics.linkLid = async function (jid, lid) {
+  return this.findOneAndUpdate(
+    { jid },
+    { $set: { lid } },
+    { new: true }
+  );
+};
+
+// ── INSTANCE METHODS ─────────────────────────────────────────────────
 userSchema.methods.addXp = function (amount) {
   this.xp += amount;
   const needed = this.level * 100;

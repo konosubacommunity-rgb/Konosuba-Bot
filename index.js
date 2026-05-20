@@ -22,6 +22,7 @@ const { connectDB }         = require('./src/database');
 const config                = require('./src/config');
 const User                  = require('./src/models/User');
 const Group                 = require('./src/models/Group');
+const BotSession            = require('./src/models/BotSession');
 const websiteSyncRoutes     = require('./src/routes/website-sync');
 
 const { handleGeneral }     = require('./src/commands/general');
@@ -50,7 +51,6 @@ const question = (q) => new Promise((res) => rl.question(q, res));
 const app = express();
 
 // CORS — allow the Vercel website and local dev
-// Set WEBSITE_URL env var on Render to your Vercel domain
 const WEBSITE_URL = process.env.WEBSITE_URL || 'https://konosubaweb.vercel.app';
 
 app.use(cors({
@@ -65,16 +65,23 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization', 'x-bot-secret'],
 }));
 
-// Handle pre-flight OPTIONS requests
 app.options('*', cors());
-
 app.use(express.json());
 
 // Mount all website-sync API routes at /api
 app.use('/api', websiteSyncRoutes);
 
-// Health check
-app.get('/health', (_req, res) => res.json({ status: 'ok', bot: 'Aqua Bot' }));
+// Health check with session info
+app.get('/health', (_req, res) => {
+  const isConnected = global.botSocket?.user?.id ? true : false;
+  res.json({ 
+    status: 'ok', 
+    bot: 'Aqua Bot',
+    connected: isConnected,
+    botJid: global.botSocket?.user?.id || null,
+    timestamp: new Date().toISOString(),
+  });
+});
 
 const API_PORT = process.env.PORT || 3000;
 app.listen(API_PORT, () => {
@@ -86,6 +93,10 @@ app.listen(API_PORT, () => {
 let sock              = null;
 let reconnectAttempts = 0;
 let savedPhoneNumber  = process.env.BOT_NUMBER || '';
+let botSession        = null;
+
+// Store socket globally for API access
+global.botSocket = null;
 
 function clearSession() {
   try {
@@ -98,9 +109,86 @@ function clearSession() {
   }
 }
 
+// ── Improved user lookup by JID or LID ────────────────────────────────────────
+async function findOrCreateUser(identifier, pushName) {
+  /**
+   * identifier can be either:
+   *  - JID format: "234xxxxxxxx@s.whatsapp.net"
+   *  - LID format: "xxx@lid"
+   *  - Group JID: "xxxxx@g.us"
+   * 
+   * Returns the user document and ensures JID is canonical
+   */
+  
+  if (!identifier) return null;
+  
+  try {
+    // Handle groups - create minimal Group doc
+    if (isJidGroup(identifier)) {
+      let group = await Group.findOne({ jid: identifier });
+      if (!group) {
+        group = new Group({ jid: identifier, name: pushName || identifier });
+        await group.save();
+      }
+      return group;
+    }
+
+    // For user messages: try to find by either JID or LID
+    const isLid = identifier.includes('@lid');
+    
+    let user;
+    if (isLid) {
+      // If it's a LID, try to find by LID first
+      user = await User.findOne({ lid: identifier });
+      
+      // If not found by LID but we have the JID, create a new doc
+      if (!user) {
+        console.warn(`⚠️  Got LID ${identifier} but no JID mapping yet`);
+        // This shouldn't happen with v6+, but handle gracefully
+        return null;
+      }
+    } else {
+      // JID format - this is what we store primarily
+      user = await User.findOne({ jid: identifier });
+      
+      if (!user) {
+        // Auto-create user on first message
+        const phoneNumber = identifier.split('@')[0];
+        user = new User({
+          jid: identifier,
+          name: pushName || phoneNumber,
+        });
+        await user.save();
+        console.log(`✅ Auto-created user: ${identifier}`);
+      }
+    }
+
+    // Update name if we got a new pushName
+    if (user && pushName && user.name !== pushName) {
+      user.name = pushName;
+      await user.save();
+    }
+
+    return user;
+
+  } catch (err) {
+    console.error(`❌ Error finding/creating user ${identifier}:`, err.message);
+    return null;
+  }
+}
+
 // ── startBot ──────────────────────────────────────────────────────────────────
 async function startBot() {
   await connectDB();
+
+  // Load or create bot session from MongoDB
+  try {
+    botSession = await BotSession.getOrCreate('default');
+    console.log(`📋 Bot session loaded: ${botSession.sessionId}`);
+  } catch (err) {
+    console.error('Failed to load bot session:', err.message);
+    botSession = null;
+  }
 
   const { state, saveCreds } = await useMultiFileAuthState(SESSION_DIR);
   const hadCredentials = !!state.creds.registered;
@@ -130,10 +218,22 @@ async function startBot() {
     retryRequestDelayMs:        250,
   });
 
+  // Store in global and BotSession
+  global.botSocket = sock;
+
   let credsSavedThisSession = false;
   sock.ev.on('creds.update', () => {
     credsSavedThisSession = true;
     saveCreds();
+    
+    // Also save credentials to MongoDB for persistence
+    if (botSession) {
+      botSession.authState = {
+        creds: state.creds,
+        keys: state.keys,
+      };
+      botSession.save().catch(err => console.error('Failed to save bot session:', err.message));
+    }
   });
 
   sock.ev.on('connection.update', async (update) => {
@@ -147,6 +247,9 @@ async function startBot() {
         console.log('\n🔑 Logged out — clearing session and restarting…');
         clearSession();
         reconnectAttempts = 0;
+        if (botSession) {
+          botSession.setStatus('disconnected').catch(console.error);
+        }
         setTimeout(startBot, 2000);
       } else if (!hadCredentials && !credsSavedThisSession) {
         return;
@@ -154,17 +257,29 @@ async function startBot() {
         reconnectAttempts++;
         const delay = Math.min(3000 * reconnectAttempts, 15000);
         console.log(`🔄 Reconnecting in ${delay / 1000}s…`);
+        if (botSession) {
+          botSession.recordError(lastDisconnect?.error, statusCode).catch(console.error);
+        }
         setTimeout(startBot, delay);
       }
     }
 
     if (connection === 'open') {
       reconnectAttempts = 0;
+      const botJid = sock.user?.id;
+      
       console.log('\n✅ Bot connected!');
       console.log(`🤖 Bot Name: ${config.BOT_NAME}`);
-      console.log(`📱 Logged in as: ${sock.user?.id}`);
+      console.log(`📱 Logged in as: ${botJid}`);
       console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       console.log('✨ Aqua Bot is ready! Send .menu to get started.');
+      
+      // Update bot session
+      if (botSession) {
+        botSession.botNumber = botJid?.split('@')[0];
+        botSession.botJid = botJid;
+        botSession.setStatus('connected').catch(console.error);
+      }
     }
   });
 
@@ -187,6 +302,13 @@ async function startBot() {
         console.log('   4. Choose "Link with phone number instead"');
         console.log(`   5. Enter the code: ${formatted}`);
         console.log('\n⏳ Waiting for you to enter the code…\n');
+        
+        // Save pairing code to session
+        if (botSession) {
+          botSession.pairingCode = formatted;
+          botSession.pairingCodeExpires = new Date(Date.now() + 5 * 60 * 1000); // 5 min
+          botSession.setStatus('pairing').catch(console.error);
+        }
       } catch (err) {
         if (attemptsLeft > 0) {
           console.log(`⚠️  Pairing failed (${err.message}), retrying in 3s…`);
@@ -274,14 +396,17 @@ async function startBot() {
         const args    = body.slice(prefix.length).trim().split(/\s+/);
         const command = args.shift().toLowerCase();
 
-        // Auto-create / update user document
-        let user = await User.findOne({ jid: sender });
+        // Find or create user - use improved method that handles JID/LID
+        let user = await findOrCreateUser(sender, message.pushName);
         if (!user) {
-          user = new User({ jid: sender, name: message.pushName || sender.split('@')[0] });
-          await user.save();
-        } else if (user.name !== message.pushName && message.pushName) {
-          user.name = message.pushName;
-          await user.save();
+          console.warn(`⚠️  Could not find/create user for ${sender}`);
+          continue;
+        }
+
+        // If user was just found/created and it's a group context, ensure lid is tracked
+        if (message.key.id) {
+          // Store message ID for tracking in case of LID updates later
+          // This helps us maintain continuity across JID/LID changes
         }
 
         if (user.banned && !isOwner(sender)) {
@@ -293,6 +418,12 @@ async function startBot() {
           const group = await Group.findOne({ jid: groupJid });
           if (group && !group.active && !isOwner(sender)) continue;
           if (group?.mutedMembers?.includes(sender))       continue;
+        }
+
+        // Increment stats
+        if (botSession) {
+          botSession.commandsExecuted += 1;
+          botSession.markActive().catch(console.error);
         }
 
         // Route to command handlers

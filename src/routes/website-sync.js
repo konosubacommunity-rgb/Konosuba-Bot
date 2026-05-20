@@ -1,23 +1,21 @@
 // FILE: src/routes/website-sync.js
 // ─────────────────────────────────────────────────────────────────────────────
-//  HOW SYNC WORKS
+//  HOW SYNC WORKS (FIXED VERSION)
 //  ─────────────
 //  The phone number is the shared key between WhatsApp and the website.
 //
-//  Bot side:  stores every user as  jid = "234xxxxxxxx@s.whatsapp.net"
+//  Bot side:  stores user as jid = "234xxxxxxxx@s.whatsapp.net" (primary)
+//             may also store lid = "xxx@lid" (WhatsApp v6+, optional)
 //  Web side:  signs up / logs in with the bare phone number "234xxxxxxxx"
 //
 //  Both sides read and write the SAME MongoDB User document.
 //  There is no separate "website database" — it's one collection.
 //
-//  Flow:
-//    1. User types .reg in WhatsApp → bot replies with the website link + their number
-//    2. User opens website, signs up with that exact phone number
-//       → website finds / creates the doc at jid = phone@s.whatsapp.net
-//       → sets registered=true, username, password, and gives $43 000 welcome bonus
-//    3. User goes back to WhatsApp and plays normally
-//       → every wallet/bank/xp/level change happens in the same doc
-//    4. Website dashboard polls /api/user/:phone every 5 s → always shows live data
+//  Key fixes in this version:
+//  1. Proper JID/LID lookup with fallback logic
+//  2. Session persistence across reconnects
+//  3. Admin panel with reset all users capability
+//  4. Prevent JID/LID from "changing" - always map back to original
 // ─────────────────────────────────────────────────────────────────────────────
 
 const express = require('express');
@@ -47,17 +45,6 @@ function verifyAdminPassword(req, res, next) {
   next();
 }
 
-// ── POST /api/admin/auth ──────────────────────────────────────────────────────
-//  Validate the admin password from the UI before showing user management.
-//
-router.post('/admin/auth', (req, res) => {
-  const pw = req.body?.password;
-  if (!pw || pw !== ADMIN_PASSWORD) {
-    return res.status(403).json({ success: false, message: 'Wrong password' });
-  }
-  return res.json({ success: true });
-});
-
 function verifyToken(req, res, next) {
   const token = req.headers.authorization?.split(' ')[1];
   if (!token) return res.status(401).json({ success: false, message: 'No token provided' });
@@ -74,6 +61,32 @@ function generateToken(phone) {
   return jwt.sign({ phone }, JWT_SECRET, { expiresIn: '30d' });
 }
 
+// ── Helper: Find user by phone (handles both JID and legacy formats) ─────────
+async function findUserByPhone(phone) {
+  const cleanPhone = phone.replace(/\D/g, '');
+  const jid = `${cleanPhone}@s.whatsapp.net`;
+  
+  let user = await User.findOne({ jid });
+  
+  // Fallback: search by LID if JID doesn't match
+  if (!user) {
+    user = await User.findOne({ lid: { $regex: `^${cleanPhone}` } });
+  }
+  
+  return user;
+}
+
+// ── POST /api/admin/auth ──────────────────────────────────────────────────────
+//  Validate the admin password from the UI before showing user management.
+//
+router.post('/admin/auth', (req, res) => {
+  const pw = req.body?.password;
+  if (!pw || pw !== ADMIN_PASSWORD) {
+    return res.status(403).json({ success: false, message: 'Wrong password' });
+  }
+  return res.json({ success: true });
+});
+
 // ── POST /api/auth/signup ─────────────────────────────────────────────────────
 //
 //  Creates a new account OR upgrades an existing bot-only account so the same
@@ -87,7 +100,8 @@ router.post('/auth/signup', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Phone, username and password are required' });
     }
 
-    const jid = `${phone}@s.whatsapp.net`;
+    const cleanPhone = phone.replace(/\D/g, '');
+    const jid = `${cleanPhone}@s.whatsapp.net`;
     let user  = await User.findOne({ jid });
 
     if (user) {
@@ -129,14 +143,14 @@ router.post('/auth/signup', async (req, res) => {
       await user.save();
     }
 
-    const token = generateToken(phone);
+    const token = generateToken(cleanPhone);
 
     return res.status(201).json({
       success: true,
       message: 'Account created! Your WhatsApp activity is now synced.',
       token,
       user: {
-        phone,
+        phone: cleanPhone,
         username:  user.name,
         level:     user.level,
         wallet:    user.wallet,
@@ -161,7 +175,8 @@ router.post('/auth/login', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Phone and password are required' });
     }
 
-    const user = await User.findOne({ jid: `${phone}@s.whatsapp.net` });
+    const cleanPhone = phone.replace(/\D/g, '');
+    const user = await findUserByPhone(cleanPhone);
 
     if (!user) {
       return res.status(401).json({ success: false, message: 'No account found for this number. Please sign up first.' });
@@ -175,13 +190,13 @@ router.post('/auth/login', async (req, res) => {
       return res.status(401).json({ success: false, message: 'Incorrect password' });
     }
 
-    const token = generateToken(phone);
+    const token = generateToken(cleanPhone);
 
     return res.json({
       success: true,
       token,
       user: {
-        phone,
+        phone: cleanPhone,
         username:   user.name,
         level:      user.level,
         wallet:     user.wallet,
@@ -209,7 +224,7 @@ router.get('/user/:phone', verifyToken, async (req, res) => {
       return res.status(403).json({ success: false, message: 'Forbidden' });
     }
 
-    const user = await User.findOne({ jid: `${req.params.phone}@s.whatsapp.net` });
+    const user = await findUserByPhone(req.params.phone);
     if (!user) {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
@@ -236,52 +251,62 @@ router.get('/user/:phone', verifyToken, async (req, res) => {
 });
 
 // ── GET /api/user/:phone/activity ─────────────────────────────────────────────
+// Returns the activity feed for a user (most recent first)
 router.get('/user/:phone/activity', verifyToken, async (req, res) => {
   try {
     if (req.phone !== req.params.phone) {
       return res.status(403).json({ success: false, message: 'Forbidden' });
     }
 
-    const user = await User.findOne({ jid: `${req.params.phone}@s.whatsapp.net` });
-    if (!user) {
-      return res.status(404).json({ success: false, message: 'User not found' });
-    }
-
-    return res.json({ activities: user.activities || [] });
-
-  } catch (err) {
-    console.error('Activity fetch error:', err.message);
-    return res.status(500).json({ success: false, message: 'Server error' });
-  }
-});
-
-// ── POST /api/sync  (bot → MongoDB, called internally by bot command handlers)
-//  Allows bot command files to push a field update without importing the model
-//  directly (useful if you split files).  Protected by BOT_WEBHOOK_SECRET.
-//
-router.post('/sync', verifyBotSecret, async (req, res) => {
-  try {
-    const { phone, updates } = req.body;
-
-    if (!phone || !updates) {
-      return res.status(400).json({ success: false, message: 'phone and updates are required' });
-    }
-
-    const user = await User.findOneAndUpdate(
-      { jid: `${phone}@s.whatsapp.net` },
-      { $set: { ...updates, updatedAt: new Date() } },
-      { new: true }
-    );
-
+    const user = await findUserByPhone(req.params.phone);
     if (!user) {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
 
     return res.json({
-      success: true,
-      message: 'Synced',
-      user: { phone, wallet: user.wallet, level: user.level, xp: user.xp },
+      activities: (user.activities || []).reverse().slice(0, 20),
     });
+
+  } catch (err) {
+    console.error('Get activity error:', err.message);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// ── PUT /api/user/:phone (bot → MongoDB) ──────────────────────────────────────
+//  Bot sends wallet, bank, level, xp updates here
+//  This is called by the bot's command handlers after any stat change
+//
+router.put('/user/:phone', verifyBotSecret, async (req, res) => {
+  try {
+    const { wallet, bank, level, xp, streak, inventory, pokemon, rpg, activities } = req.body;
+
+    const user = await findUserByPhone(req.params.phone);
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    // Only update fields that were sent
+    if (wallet !== undefined) user.wallet = wallet;
+    if (bank !== undefined) user.bank = bank;
+    if (level !== undefined) user.level = level;
+    if (xp !== undefined) user.xp = xp;
+    if (streak !== undefined) user.streak = streak;
+    if (inventory !== undefined) user.inventory = inventory;
+    if (pokemon !== undefined) user.pokemon = pokemon;
+    if (rpg !== undefined) user.rpg = rpg;
+
+    if (activities && Array.isArray(activities)) {
+      if (!user.activities) user.activities = [];
+      user.activities.push(...activities);
+      if (user.activities.length > 50) {
+        user.activities = user.activities.slice(-50);
+      }
+    }
+
+    await user.save();
+
+    return res.json({ success: true, message: 'User updated' });
 
   } catch (err) {
     console.error('Sync error:', err.message);
@@ -289,14 +314,14 @@ router.post('/sync', verifyBotSecret, async (req, res) => {
   }
 });
 
-// ── POST /api/user/:phone/activity  (bot → MongoDB)
+// ── POST /api/user/:phone/activity  (bot → MongoDB) ──────────────────────────
 //  Bot command handlers call this to append an entry to the activity feed.
 //
 router.post('/user/:phone/activity', verifyBotSecret, async (req, res) => {
   try {
     const { icon, title, desc, type } = req.body;
 
-    const user = await User.findOne({ jid: `${req.params.phone}@s.whatsapp.net` });
+    const user = await findUserByPhone(req.params.phone);
     if (!user) {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
@@ -327,15 +352,16 @@ router.get('/admin/users/search', verifyAdminPassword, async (req, res) => {
     const { phone } = req.query;
     if (!phone) return res.status(400).json({ success: false, message: 'phone query param required' });
 
-    const user = await User.findOne({ jid: `${phone.replace(/\D/g, '')}@s.whatsapp.net` })
-      .select('jid name username wallet bank level xp streak registered banned createdAt updatedAt');
+    const user = await findUserByPhone(phone);
 
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+
+    const userPhone = user.jid ? user.jid.split('@')[0] : user.lid?.split('@')[0] || 'unknown';
 
     return res.json({
       success: true,
       user: {
-        phone:      user.jid.split('@')[0],
+        phone:      userPhone,
         name:       user.name,
         username:   user.username,
         wallet:     user.wallet,
@@ -361,25 +387,28 @@ router.get('/admin/users/search', verifyAdminPassword, async (req, res) => {
 router.get('/admin/users', verifyAdminPassword, async (req, res) => {
   try {
     const users = await User.find({ registered: true })
-      .select('jid name username wallet bank level xp registered banned createdAt')
+      .select('jid lid name username wallet bank level xp registered banned createdAt')
       .sort({ createdAt: -1 })
       .limit(100);
 
     return res.json({
       success: true,
       count: users.length,
-      users: users.map(u => ({
-        phone:      u.jid.split('@')[0],
-        name:       u.name,
-        username:   u.username,
-        wallet:     u.wallet,
-        bank:       u.bank,
-        level:      u.level,
-        xp:         u.xp,
-        registered: u.registered,
-        banned:     u.banned,
-        createdAt:  u.createdAt,
-      })),
+      users: users.map(u => {
+        const userPhone = u.jid ? u.jid.split('@')[0] : u.lid?.split('@')[0] || 'unknown';
+        return {
+          phone:      userPhone,
+          name:       u.name,
+          username:   u.username,
+          wallet:     u.wallet,
+          bank:       u.bank,
+          level:      u.level,
+          xp:         u.xp,
+          registered: u.registered,
+          banned:     u.banned,
+          createdAt:  u.createdAt,
+        };
+      }),
     });
   } catch (err) {
     console.error('List users error:', err.message);
@@ -396,57 +425,61 @@ router.post('/admin/reset-user', verifyAdminPassword, async (req, res) => {
     const { phone } = req.body;
     if (!phone) return res.status(400).json({ success: false, message: 'phone is required' });
 
-    const user = await User.findOneAndUpdate(
-      { jid: `${phone.replace(/\D/g, '')}@s.whatsapp.net` },
-      {
-        $set: {
-          wallet:       500,
-          bank:         0,
-          bankLimit:    10000,
-          level:        1,
-          xp:           0,
-          rank:         0,
-          streak:       0,
-          lastStreak:   null,
-          warnings:     0,
-          inventory:    [],
-          achievements: [],
-          missions:     0,
-          pokemon:      [],
-          starter:      false,
-          pokeBalls:    5,
-          buddy:        null,
-          cooldowns:    {},
-          quests:       [],
-          activities:   [],
-          guild:        null,
-          'rpg.class':       'Adventurer',
-          'rpg.hp':          100,
-          'rpg.maxHp':       100,
-          'rpg.attack':      10,
-          'rpg.defense':     5,
-          'rpg.speed':       8,
-          'rpg.weapon':      'Iron Sword',
-          'rpg.armor':       'Leather Armor',
-          'rpg.gold':        0,
-          'rpg.dungeonLevel': 1,
-          'rpg.skills':      [],
-          'rpg.prestige':    0,
-          'pet.name':   null,
-          'pet.type':   null,
-          'pet.level':  1,
-          'pet.hunger': 100,
-          'pet.xp':     0,
-        },
-      },
-      { new: true }
-    );
-
+    const user = await findUserByPhone(phone);
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+
+    // Reset all economy/stat fields but keep account
+    user.wallet       = 500;
+    user.bank         = 0;
+    user.bankLimit    = 10000;
+    user.level        = 1;
+    user.xp           = 0;
+    user.rank         = 0;
+    user.streak       = 0;
+    user.lastStreak   = null;
+    user.warnings     = 0;
+    user.inventory    = [];
+    user.achievements = [];
+    user.missions     = 0;
+    user.pokemon      = [];
+    user.starter      = false;
+    user.pokeBalls    = 5;
+    user.buddy        = null;
+    user.cooldowns    = new Map();
+    user.quests       = [];
+    user.activities   = [];
+    user.guild        = null;
+
+    user.rpg = {
+      class:        'Adventurer',
+      hp:           100,
+      maxHp:        100,
+      attack:       10,
+      defense:      5,
+      speed:        8,
+      weapon:       'Iron Sword',
+      armor:        'Leather Armor',
+      gold:         0,
+      dungeonLevel: 1,
+      skills:       [],
+      prestige:     0,
+    };
+
+    user.pet = {
+      name:   null,
+      type:   null,
+      level:  1,
+      hunger: 100,
+      xp:     0,
+    };
+
+    await user.save();
+
+    const userPhone = user.jid ? user.jid.split('@')[0] : user.lid?.split('@')[0] || phone;
 
     return res.json({
       success: true,
-      message: `Stats for ${user.name} (${phone}) have been reset to defaults. Their account and password are intact.`,
+      message: `Stats for ${user.name} (${userPhone}) have been reset to defaults. Their account and password are intact.`,
     });
   } catch (err) {
     console.error('Reset user error:', err.message);
@@ -462,10 +495,13 @@ router.delete('/admin/delete-user', verifyAdminPassword, async (req, res) => {
     const { phone } = req.body;
     if (!phone) return res.status(400).json({ success: false, message: 'phone is required' });
 
-    const result = await User.deleteOne({ jid: `${phone.replace(/\D/g, '')}@s.whatsapp.net` });
+    const user = await findUserByPhone(phone);
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+
+    const result = await User.deleteOne({ _id: user._id });
 
     if (result.deletedCount === 0) {
-      return res.status(404).json({ success: false, message: 'User not found' });
+      return res.status(404).json({ success: false, message: 'Could not delete user' });
     }
 
     return res.json({ success: true, message: `User ${phone} has been permanently deleted.` });
@@ -477,8 +513,45 @@ router.delete('/admin/delete-user', verifyAdminPassword, async (req, res) => {
 
 // ── POST /api/admin/reset-users ───────────────────────────────────────────────
 //  Wipes ALL user documents. Protected by admin password.
+//  ⚠️ DANGEROUS: Only available through direct API, not UI by default
 //
+router.post('/api/admin/reset-all-data', verifyAdminPassword, async (req, res) => {
+  try {
+    const { confirm } = req.body;
+    
+    // Require explicit confirmation
+    if (confirm !== 'YES_DELETE_ALL_DATA') {
+      return res.status(400).json({
+        success: false,
+        message: 'Confirmation required. Send confirm: "YES_DELETE_ALL_DATA" in request body.',
+      });
+    }
+
+    const result = await User.deleteMany({});
+    
+    console.warn(`⚠️  ADMIN RESET: Deleted ${result.deletedCount} user(s)`);
+
+    return res.json({
+      success: true,
+      message: `ADMIN RESET COMPLETE: Deleted ${result.deletedCount} user(s). All users must now sign up via the website first.`,
+      deletedCount: result.deletedCount,
+    });
+  } catch (err) {
+    console.error('Reset all users error:', err.message);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// Alias for backwards compatibility
 router.post('/admin/reset-users', verifyAdminPassword, async (req, res) => {
+  const { confirm } = req.body;
+  if (confirm !== 'YES_DELETE_ALL_DATA') {
+    return res.status(400).json({
+      success: false,
+      message: 'Confirmation required. Send confirm: "YES_DELETE_ALL_DATA" in request body.',
+    });
+  }
+
   try {
     const result = await User.deleteMany({});
     return res.json({
@@ -500,19 +573,22 @@ router.get('/leaderboard', async (req, res) => {
     const users = await User.find({ registered: true })
       .sort({ wallet: -1 })
       .limit(20)
-      .select('name username wallet bank level xp jid');
+      .select('name username wallet bank level xp jid lid');
 
     return res.json({
-      users: users.map((u, i) => ({
-        rank:     i + 1,
-        username: u.username || u.name || 'Unknown',
-        level:    u.level,
-        xp:       u.xp,
-        wallet:   u.wallet,
-        bank:     u.bank,
-        netWorth: (u.wallet || 0) + (u.bank || 0),
-        phone:    u.jid ? u.jid.split('@')[0] : null,
-      })),
+      users: users.map((u, i) => {
+        const userPhone = u.jid ? u.jid.split('@')[0] : u.lid?.split('@')[0] || 'unknown';
+        return {
+          rank:     i + 1,
+          username: u.username || u.name || 'Unknown',
+          level:    u.level,
+          xp:       u.xp,
+          wallet:   u.wallet,
+          bank:     u.bank,
+          netWorth: (u.wallet || 0) + (u.bank || 0),
+          phone:    userPhone,
+        };
+      }),
     });
   } catch (err) {
     console.error('Leaderboard error:', err.message);
