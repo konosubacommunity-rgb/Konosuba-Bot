@@ -1,77 +1,68 @@
-const API_ORIGIN: string = (import.meta.env.VITE_API_URL as string | undefined) || '';
-const BASE = `${API_ORIGIN}/api/website`;
+const BASE = "https://konosuba-api.onrender.com/api";
 
-export function getToken(): string | null {
-  return localStorage.getItem('konosuba_token');
-}
-
-export function setToken(token: string) {
-  localStorage.setItem('konosuba_token', token);
-}
-
-export function removeToken() {
-  localStorage.removeItem('konosuba_token');
-  localStorage.removeItem('konosuba_user');
-}
-
-export function getCurrentUser(): Record<string, unknown> | null {
-  try {
-    const raw = localStorage.getItem('konosuba_user');
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
-}
-
-export function setCurrentUser(user: Record<string, unknown>) {
-  localStorage.setItem('konosuba_user', JSON.stringify(user));
-}
-
-function authHeaders() {
-  const token = getToken();
-  return {
-    'Content-Type': 'application/json',
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-  };
-}
-
-async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
+async function req<T>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
-    ...opts,
-    headers: { ...authHeaders(), ...(opts.headers || {}) },
+    method,
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: body ? JSON.stringify(body) : undefined,
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(err.error || 'Request failed');
+    throw new Error(err.error || res.statusText);
   }
-  return res.json() as T;
+  return res.json();
 }
 
 export const api = {
-  login: (phone: string, password?: string) =>
-    request<{ token: string; user: Record<string, unknown> }>('/auth/login', {
-      method: 'POST',
-      body: JSON.stringify({ phone, password }),
-    }),
-
-  register: (phone: string, password?: string, name?: string) =>
-    request<{ token: string; user: Record<string, unknown> }>('/auth/register', {
-      method: 'POST',
-      body: JSON.stringify({ phone, password, name }),
-    }),
-
-  me: () => request<Record<string, unknown>>('/user/me'),
-
-  profile: (phone: string) =>
-    request<Record<string, unknown>>(`/user/${phone}/profile`),
-
-  activity: (phone: string) =>
-    request<unknown[]>(`/user/${phone}/activity`),
-
-  inventory: (phone: string) =>
-    request<unknown[]>(`/user/${phone}/inventory`),
-
-  leaderboard: () => request<unknown[]>('/leaderboard'),
-
-  stats: () => request<Record<string, unknown>>('/stats'),
+  getStats: () => req<{ users: number; bots: number; messages: number; groups: number }>("GET", "/stats"),
+  login: (data: { email: string; password: string }) => req<{ token: string; user: User }>("POST", "/auth/login", data),
+  register: (data: { username: string; email: string; password: string }) => req<{ token: string; user: User }>("POST", "/auth/register", data),
+  getMe: () => req<User>("GET", "/auth/me"),
+  getDashboard: () => req<DashboardData>("GET", "/dashboard"),
+  getBots: () => req<Bot[]>("GET", "/bots"),
+  logout: () => req<void>("POST", "/auth/logout"),
 };
+
+export interface User {
+  id: string;
+  username: string;
+  email: string;
+  plan: "free" | "basic" | "pro" | "enterprise";
+  createdAt: string;
+}
+
+export interface Bot {
+  id: string;
+  name: string;
+  number: string;
+  status: "active" | "inactive" | "connecting";
+  groups: number;
+  messagesHandled: number;
+  createdAt: string;
+}
+
+export interface DashboardData {
+  stats: { users: number; bots: number; messages: number; groups: number };
+  bots: Bot[];
+  recentActivity: ActivityItem[];
+}
+
+export interface ActivityItem {
+  id: string;
+  type: string;
+  description: string;
+  time: string;
+}
+
+export function getStoredToken(): string | null {
+  return localStorage.getItem("token");
+}
+
+export function setStoredToken(token: string): void {
+  localStorage.setItem("token", token);
+}
+
+export function clearStoredToken(): void {
+  localStorage.removeItem("token");
+}

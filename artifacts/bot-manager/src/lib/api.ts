@@ -1,195 +1,101 @@
-const API_ORIGIN: string = (import.meta.env.VITE_API_URL as string | undefined) || '';
-const BASE = `${API_ORIGIN}/api/website`;
-const ADMIN_KEY = (() => {
-  try { return localStorage.getItem('adminKey') || ''; } catch { return ''; }
-})();
+const BASE = "https://konosuba-api.onrender.com/api/admin";
 
-export function getStoredKey(): string {
-  try { return localStorage.getItem('adminKey') || ''; } catch { return ''; }
+function getAdminKey(): string {
+  return localStorage.getItem("admin_key") || "";
 }
 
-function adminHeaders(): Record<string, string> {
-  return {
-    'Content-Type': 'application/json',
-    'x-admin-key':  getStoredKey(),
-  };
-}
-
-async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
+async function req<T>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
-    ...opts,
-    headers: { ...adminHeaders(), ...(opts.headers || {}) },
+    method,
+    headers: {
+      "Content-Type": "application/json",
+      "x-admin-key": getAdminKey(),
+    },
+    body: body ? JSON.stringify(body) : undefined,
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(err.error || 'Request failed');
+    throw new Error(err.error || res.statusText);
   }
-  return res.json() as Promise<T>;
-}
-
-export interface AdminUser {
-  _id: string;
-  phone: string;
-  jid?: string;
-  lid?: string;
-  name: string;
-  wallet: number;
-  bank: number;
-  bankLimit: number;
-  netWorth: number;
-  level: number;
-  xp: number;
-  banned: boolean;
-  isMod: boolean;
-  isAdmin: boolean;
-  warnings: number;
-  registered: boolean;
-  createdAt?: string;
-  updatedAt?: string;
-  inventory?: { item: string; qty: number }[];
-  cooldowns?: Record<string, string>;
-}
-
-export interface PaginationInfo {
-  page: number;
-  limit: number;
-  total: number;
-  pages: number;
-}
-
-export interface DuplicateUser {
-  _id: string;
-  jid?: string;
-  lid?: string;
-  phone: string;
-  name: string;
-  wallet: number;
-  bank: number;
-  level: number;
-  xp: number;
-  banned: boolean;
-  createdAt?: string;
-}
-
-export interface DuplicateGroup {
-  phone: string;
-  count: number;
-  users: DuplicateUser[];
-}
-
-export interface MigrationResult {
-  success: boolean;
-  normalized: number;
-  alreadySet: number;
-  lidOnly: number;
-  conflicts: number;
-  conflictList: { phone: string; userA: string; userB: string }[];
-  message: string;
-}
-
-export interface BotEntry {
-  _id: string;
-  botId: string;
-  name: string;
-  phone: string;
-  avatarData?: string;
-  createdAt: string;
-  status?: 'connected' | 'offline' | 'pending' | 'disconnected';
-}
-
-export interface PairingResult {
-  success: boolean;
-  botId: string;
-  pairingCode?: string;
-  status: 'pending' | 'already_connected';
-  message?: string;
-}
-
-export interface PairingStatus {
-  status: 'pending' | 'connected' | 'disconnected' | 'not_found';
-  pairingCode?: string;
-  phone?: string;
+  return res.json();
 }
 
 export const adminApi = {
-  // ── Stats ──────────────────────────────────────────────────────────────
-  getStats: () => request<Record<string, unknown>>('/stats'),
+  verifyKey: (key: string) =>
+    fetch(`${BASE}/verify`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key }),
+    }).then(r => r.json() as Promise<{ valid: boolean }>),
 
-  // ── Users ──────────────────────────────────────────────────────────────
-  listUsers: (page = 1, limit = 20, search = '') =>
-    request<{ users: AdminUser[]; pagination: PaginationInfo }>(
-      `/admin/users?page=${page}&limit=${limit}&search=${encodeURIComponent(search)}`
-    ),
+  getStats: () => req<AdminStats>("GET", "/stats"),
+  getBots: () => req<AdminBot[]>("GET", "/bots"),
+  createBot: (data: Partial<AdminBot>) => req<AdminBot>("POST", "/bots", data),
+  updateBot: (id: string, data: Partial<AdminBot>) => req<AdminBot>("PATCH", `/bots/${id}`, data),
+  deleteBot: (id: string) => req<void>("DELETE", `/bots/${id}`),
+  restartBot: (id: string) => req<void>("POST", `/bots/${id}/restart`),
 
-  getUser: (phone: string) =>
-    request<AdminUser>(`/admin/user/${phone}`),
+  getUsers: () => req<AdminUser[]>("GET", "/users"),
+  updateUser: (id: string, data: Partial<AdminUser>) => req<AdminUser>("PATCH", `/users/${id}`, data),
+  deleteUser: (id: string) => req<void>("DELETE", `/users/${id}`),
 
-  editUser: (phone: string, data: Partial<AdminUser>) =>
-    request<{ success: boolean; user: AdminUser }>('/admin/edit-user', {
-      method: 'PUT',
-      body: JSON.stringify({ phone, ...data }),
-    }),
+  getDuplicates: () => req<Duplicate[]>("GET", "/duplicates"),
+  deleteDuplicate: (id: string) => req<void>("DELETE", `/duplicates/${id}`),
 
-  banUser: (phone: string) =>
-    request<{ success: boolean }>('/admin/ban-user', {
-      method: 'POST', body: JSON.stringify({ phone }),
-    }),
+  getLogs: () => req<LogEntry[]>("GET", "/logs"),
 
-  unbanUser: (phone: string) =>
-    request<{ success: boolean }>('/admin/unban-user', {
-      method: 'POST', body: JSON.stringify({ phone }),
-    }),
-
-  resetCooldowns: (phone: string) =>
-    request<{ success: boolean }>('/admin/reset-cooldowns', {
-      method: 'POST', body: JSON.stringify({ phone }),
-    }),
-
-  deleteUser: (phone: string) =>
-    request<{ success: boolean }>('/admin/delete-user', {
-      method: 'DELETE', body: JSON.stringify({ phone }),
-    }),
-
-  // ── Global wipes ───────────────────────────────────────────────────────
-  wipeEconomy:   () => request<{ success: boolean; message: string }>('/admin/wipe-economy',   { method: 'POST' }),
-  wipeXP:        () => request<{ success: boolean; message: string }>('/admin/wipe-xp',        { method: 'POST' }),
-  wipeInventory: () => request<{ success: boolean; message: string }>('/admin/wipe-inventory', { method: 'POST' }),
-
-  exportUsers: () => {
-    const key = encodeURIComponent(getStoredKey());
-    const a = document.createElement('a');
-    a.href = `${BASE}/admin/export-users?adminKey=${key}`;
-    a.download = 'users.csv';
-    a.click();
-  },
-
-  // ── Duplicate detection & merge ────────────────────────────────────────
-  detectDuplicates: () =>
-    request<{ duplicates: DuplicateGroup[]; totalGroups: number }>('/admin/detect-duplicates'),
-
-  mergeUsers: (primaryPhone: string, secondaryPhone: string) =>
-    request<{ success: boolean; merged: string; deleted: string; summary: Record<string, unknown> }>(
-      '/admin/merge-users',
-      { method: 'POST', body: JSON.stringify({ primaryPhone, secondaryPhone }) }
-    ),
-
-  // ── Migration ──────────────────────────────────────────────────────────
-  runMigration: () =>
-    request<MigrationResult>('/admin/run-migration', { method: 'POST' }),
-
-  // ── Bots ───────────────────────────────────────────────────────────────
-  listBots: () =>
-    request<{ bots: BotEntry[] }>('/admin/bots'),
-
-  startPairing: (phone: string, name: string) =>
-    request<PairingResult>('/admin/bots/start-pairing', {
-      method: 'POST',
-      body: JSON.stringify({ phone, name }),
-    }),
-
-  getPairingStatus: (botId: string) =>
-    request<PairingStatus>(`/admin/bots/pairing-status/${encodeURIComponent(botId)}`),
-
-  deleteBot: (botId: string) =>
-    request<{ success: boolean }>(`/admin/bots/${encodeURIComponent(botId)}`, { method: 'DELETE' }),
+  migrateData: (data: unknown) => req<{ migrated: number }>("POST", "/migrate", data),
+  broadcastMessage: (data: { message: string; targets: string[] }) =>
+    req<{ sent: number }>("POST", "/broadcast", data),
 };
+
+export interface AdminStats {
+  totalBots: number;
+  activeBots: number;
+  totalUsers: number;
+  premiumUsers: number;
+  totalGroups: number;
+  messagesHandled: number;
+  duplicatesFound: number;
+  uptime: string;
+}
+
+export interface AdminBot {
+  id: string;
+  name: string;
+  number: string;
+  status: "active" | "inactive" | "connecting" | "error";
+  groups: number;
+  users: number;
+  messagesHandled: number;
+  owner: string;
+  createdAt: string;
+  lastSeen: string;
+}
+
+export interface AdminUser {
+  id: string;
+  username: string;
+  email: string;
+  plan: "free" | "basic" | "pro" | "enterprise";
+  bots: number;
+  status: "active" | "suspended";
+  joinedAt: string;
+  lastLogin: string;
+}
+
+export interface Duplicate {
+  id: string;
+  number: string;
+  occurrences: number;
+  groups: string[];
+  firstSeen: string;
+}
+
+export interface LogEntry {
+  id: string;
+  level: "info" | "warn" | "error";
+  message: string;
+  botId?: string;
+  timestamp: string;
+}

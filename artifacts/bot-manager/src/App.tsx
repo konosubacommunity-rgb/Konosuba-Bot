@@ -1,6 +1,6 @@
 import { Switch, Route, Router as WouterRouter } from "wouter";
-import Manager from "./pages/Manager";
-import NotFound from "./pages/not-found";
+import NotFound from "@/pages/not-found";
+import Manager from "@/pages/Manager";
 
 function Router() {
   return (
@@ -11,10 +11,12 @@ function Router() {
   );
 }
 
-export default function App() {
+function App() {
   return (
-    <WouterRouter>
+    <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
       <Router />
     </WouterRouter>
   );
 }
+
+export default App;

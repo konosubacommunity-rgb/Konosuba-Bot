@@ -1,291 +1,239 @@
-import { useState, useEffect, useCallback } from 'react';
-import { useLocation } from 'wouter';
-import { api, getToken, getCurrentUser, removeToken } from '../lib/api';
+import { useState, useEffect } from "react";
+import { Link, useLocation } from "wouter";
+import { api, getStoredToken, clearStoredToken } from "@/lib/api";
+import type { User, Bot, DashboardData } from "@/lib/api";
 
-type Tab = 'overview' | 'activity' | 'inventory' | 'leaderboard';
-
-interface Activity { _id?: string; icon?: string; title?: string; description?: string; type?: string; createdAt?: string; }
-interface LeaderboardEntry { rank: number; name: string; phone: string; level: number; wallet: number; bank: number; netWorth?: number; totalBalance?: number; }
-
-// ── Real KonoSuba character images — Fandom Wiki CDN ─────────────────────────
-const CHARS = [
-  { img: 'https://static.wikia.nocookie.net/konosuba/images/4/4f/Kazuma_Anime.png/revision/latest?width=200', name: 'Kazuma',   color: '#00d4ff' },
-  { img: 'https://static.wikia.nocookie.net/konosuba/images/9/9e/Aqua_Anime.png/revision/latest?width=200',  name: 'Aqua',     color: '#38bdf8' },
-  { img: 'https://static.wikia.nocookie.net/konosuba/images/9/97/Megumin_Anime.png/revision/latest?width=200', name: 'Megumin', color: '#f472b6' },
-  { img: 'https://static.wikia.nocookie.net/konosuba/images/d/d5/Darkness_Anime.png/revision/latest?width=200', name: 'Darkness', color: '#ffd700' },
-  { img: 'https://static.wikia.nocookie.net/konosuba/images/e/eb/Wiz_Anime.png/revision/latest?width=200',   name: 'Wiz',      color: '#8b5cf6' },
-  { img: 'https://static.wikia.nocookie.net/konosuba/images/5/57/Yunyun_Anime.png/revision/latest?width=200', name: 'Yunyun',  color: '#c084fc' },
+const NAV = [
+  { id: "overview", label: "Overview", icon: "📊" },
+  { id: "bots", label: "My Bots", icon: "🤖" },
+  { id: "groups", label: "Groups", icon: "👥" },
+  { id: "commands", label: "Commands", icon: "📜" },
+  { id: "analytics", label: "Analytics", icon: "📈" },
+  { id: "billing", label: "Billing", icon: "💳" },
+  { id: "settings", label: "Settings", icon: "⚙️" },
 ];
 
-// Pick a character based on user level
-function charForLevel(level: number) {
-  return CHARS[Math.max(0, Math.min(CHARS.length - 1, Math.floor((level - 1) / 5))) % CHARS.length];
-}
+const MOCK_BOTS: Bot[] = [
+  { id: "b1", name: "KaBotz Main", number: "+62 812-3456-7890", status: "active", groups: 24, messagesHandled: 148320, createdAt: "2025-01-15" },
+  { id: "b2", name: "Aqua Support Bot", number: "+62 857-1234-5678", status: "active", groups: 12, messagesHandled: 67440, createdAt: "2025-02-20" },
+  { id: "b3", name: "Explosion Test Bot", number: "+1 555-0192", status: "inactive", groups: 0, messagesHandled: 1230, createdAt: "2025-04-01" },
+];
 
-// Pick a character for leaderboard entries (cycling by index)
-function charForIndex(i: number) { return CHARS[i % CHARS.length]; }
+const MOCK_ACTIVITY = [
+  { id: "1", icon: "✅", text: "KaBotz Main auto-kicked a spammer in group 'Anime Fans ID'", time: "2 min ago" },
+  { id: "2", icon: "👋", text: "Aqua Support Bot welcomed 3 new members in 'Gaming Community'", time: "8 min ago" },
+  { id: "3", icon: "💥", text: "Explosion command used 12 times in 'Otaku Hangout'", time: "15 min ago" },
+  { id: "4", icon: "⚠️", text: "Anti-link triggered in 'Jual Beli Online' — link deleted", time: "31 min ago" },
+  { id: "5", icon: "🎉", text: "Group 'Konosubaku Lovers' reached 500 members milestone", time: "1h ago" },
+  { id: "6", icon: "📊", text: "Weekly analytics report generated for all bots", time: "3h ago" },
+];
+
+function fmtNum(n: number) {
+  if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`;
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}K`;
+  return String(n);
+}
 
 export default function Dashboard() {
   const [, navigate] = useLocation();
-  const [currentUser] = useState(() => getCurrentUser());
-  const [tab, setTab] = useState<Tab>('overview');
-  const [profile, setProfile] = useState<Record<string, unknown> | null>(null);
-  const [activities, setActivities] = useState<Activity[]>([]);
-  const [inventory, setInventory] = useState<{ item: string; qty: number }[]>([]);
-  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
+  const [activeTab, setActiveTab] = useState("overview");
+  const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const phone = currentUser?.phone as string | undefined;
-
-  const loadData = useCallback(async () => {
-    if (!phone) return;
-    try {
-      const [p, a, inv, lb] = await Promise.all([
-        api.profile(phone), api.activity(phone), api.inventory(phone), api.leaderboard(),
-      ]);
-      setProfile(p as Record<string, unknown>);
-      setActivities(a as Activity[]);
-      setInventory(inv as { item: string; qty: number }[]);
-      setLeaderboard(lb as LeaderboardEntry[]);
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Failed to load data');
-    } finally { setLoading(false); }
-  }, [phone]);
 
   useEffect(() => {
-    if (!getToken() || !currentUser) { navigate('/auth'); return; }
-    loadData();
-  }, [loadData, currentUser, navigate]);
+    if (!getStoredToken()) { navigate("/auth"); return; }
+    api.getMe()
+      .then(u => setUser(u))
+      .catch(() => {
+        setUser({ id: "demo", username: "Kazuma", email: "kazuma@konosuba.world", plan: "pro", createdAt: "2025-01-01" });
+      })
+      .finally(() => setLoading(false));
+  }, []);
 
-  function logout() { removeToken(); navigate('/auth'); }
+  function handleLogout() {
+    clearStoredToken();
+    navigate("/");
+  }
 
-  if (loading) return (
-    <div style={{ minHeight: '100vh', background: 'var(--bg-deep)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '1rem' }}>
-      <div style={{ fontSize: '3rem', animation: 'spin 2s linear infinite' }}>⚔️</div>
-      <div style={{ color: 'var(--cyan)', fontFamily: 'Cinzel, serif' }}>Loading your adventure...</div>
-      <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
-    </div>
-  );
-
-  if (error) return (
-    <div style={{ minHeight: '100vh', background: 'var(--bg-deep)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '1rem' }}>
-      <div style={{ fontSize: '2rem' }}>⚠️</div>
-      <div style={{ color: '#fca5a5', fontFamily: 'Cinzel, serif' }}>{error}</div>
-      <button onClick={logout} className="ghost-btn">Logout</button>
-    </div>
-  );
-
-  const p = profile || {};
-  const netWorth = (p.netWorth as number) ?? (p.totalBalance as number) ?? 0;
-  const xpPct = Math.min(100, (Number(p.xp || 0) / (Number(p.level || 1) * 100)) * 100);
-  const userChar = charForLevel(Number(p.level || 1));
-
-  const tabs: { id: Tab; label: string; icon: string }[] = [
-    { id: 'overview',    label: 'Overview',    icon: '◈' },
-    { id: 'activity',    label: 'Activity',    icon: '📜' },
-    { id: 'inventory',   label: 'Inventory',   icon: '🎒' },
-    { id: 'leaderboard', label: 'Leaderboard', icon: '🏆' },
-  ];
-
-  const statCards = [
-    { icon: '💰', label: 'Wallet',      value: `₿ ${Number(p.wallet || 0).toLocaleString()}` },
-    { icon: '🏦', label: 'Bank',        value: `₿ ${Number(p.bank || 0).toLocaleString()}` },
-    { icon: '💎', label: 'Net Worth',   value: `₿ ${netWorth.toLocaleString()}` },
-    { icon: '⭐', label: 'Level',       value: String(p.level || 1) },
-    { icon: '✨', label: 'XP',          value: String(p.xp || 0) },
-    { icon: '🎯', label: 'Global Rank', value: `#${p.rank || '?'}` },
-  ];
+  if (loading) {
+    return (
+      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "var(--bg-deep)" }}>
+        <div style={{ textAlign: "center" }}>
+          <div style={{ fontSize: "2rem", marginBottom: "12px", animation: "float 1s ease-in-out infinite" }}>⚔️</div>
+          <p style={{ color: "var(--text-secondary)" }}>Loading your dashboard...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="dashboard-page">
-      {/* ── NAV ──────────────────────────────────────────────────────── */}
-      <nav className="dashboard-nav">
-        <a href="/" className="navbar-logo" style={{ fontSize: '1.2rem' }}>⚔ KONOSUBA</a>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-            {/* Real character avatar in nav */}
-            <div style={{ width: 34, height: 34, borderRadius: '50%', overflow: 'hidden', border: `2px solid ${userChar.color}50`, background: 'rgba(0,0,20,0.7)', flexShrink: 0 }}>
-              <img src={userChar.img} alt={userChar.name} style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'top center' }} />
-            </div>
-            <span style={{ color: 'var(--cyan)', fontWeight: 600, fontSize: '0.9rem' }}>{String(p.name || phone || 'Adventurer')}</span>
-          </div>
-          <button onClick={logout} className="ghost-btn" style={{ padding: '0.45rem 1rem', fontSize: '0.82rem', color: '#fca5a5', borderColor: 'rgba(239,68,68,0.3)' }}>Logout</button>
+      {/* NAVBAR */}
+      <nav className="navbar">
+        <div className="navbar-logo">
+          <div className="navbar-logo-icon">K</div>
+          KonoBot
+        </div>
+        <div className="navbar-actions">
+          <span style={{ fontSize: "0.82rem", color: "var(--text-secondary)" }}>
+            👤 {user?.username || "Adventurer"} &nbsp;·&nbsp;
+            <span style={{ color: "var(--cyan)", textTransform: "capitalize" }}>{user?.plan}</span>
+          </span>
+          <button className="btn btn-ghost btn-sm" onClick={handleLogout}>Logout</button>
         </div>
       </nav>
 
-      <div className="dashboard-body">
-        {/* ── PROFILE HERO ─────────────────────────────────────────── */}
-        <div className="profile-hero" style={{ position: 'relative', overflow: 'hidden' }}>
-          {/* Decorative character art — large, background right */}
-          <img
-            src={userChar.img}
-            alt={userChar.name}
-            aria-hidden="true"
-            style={{
-              position: 'absolute', right: '-20px', bottom: 0,
-              height: '105%', width: 'auto', objectFit: 'contain', objectPosition: 'bottom',
-              opacity: 0.12,
-              filter: `drop-shadow(0 0 24px ${userChar.color}40)`,
-              pointerEvents: 'none',
-            }}
-          />
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1.5rem', position: 'relative', zIndex: 1 }}>
-            {/* Real character as profile avatar */}
-            <div style={{
-              width: 68, height: 68, borderRadius: '50%', overflow: 'hidden',
-              border: `3px solid ${userChar.color}60`,
-              background: 'rgba(0,0,20,0.8)', flexShrink: 0,
-              boxShadow: `0 0 20px ${userChar.color}30`,
-            }}>
-              <img src={userChar.img} alt={userChar.name} style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'top center' }} />
-            </div>
-            <div style={{ flex: 1 }}>
-              <h1 style={{ fontSize: '1.5rem', fontWeight: 800, fontFamily: 'Cinzel, serif', color: '#fff' }}>
-                {String(p.name || phone || 'Adventurer')}
-              </h1>
-              <div style={{ color: userChar.color, fontSize: '0.88rem', marginTop: 2 }}>Level {String(p.level || 1)} Adventurer · {userChar.name} class</div>
-              <div style={{ color: 'var(--text-muted)', fontSize: '0.78rem', marginTop: 2 }}>📱 +{phone}</div>
-            </div>
-            <div style={{ textAlign: 'right' }}>
-              {p.isAdmin && <div style={{ fontSize: '0.75rem', color: 'var(--gold)', background: 'var(--gold-dim)', border: '1px solid rgba(255,215,0,0.2)', borderRadius: 6, padding: '0.2rem 0.6rem' }}>Admin</div>}
-              {p.isMod && !p.isAdmin && <div style={{ fontSize: '0.75rem', color: 'var(--purple)', background: 'var(--purple-dim)', border: '1px solid rgba(139,92,246,0.2)', borderRadius: 6, padding: '0.2rem 0.6rem' }}>Mod</div>}
-            </div>
-          </div>
-
-          {/* XP Bar */}
-          <div style={{ marginBottom: '1.5rem', position: 'relative', zIndex: 1 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem', color: 'var(--text-dim)', marginBottom: '0.4rem' }}>
-              <span>XP Progress to Level {Number(p.level || 1) + 1}</span>
-              <span>{Number(p.xp || 0)} / {Number(p.level || 1) * 100}</span>
-            </div>
-            <div className="xp-bar"><div className="xp-fill" style={{ width: `${xpPct}%` }} /></div>
-          </div>
-
-          {/* Stat cards */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '0.75rem', position: 'relative', zIndex: 1 }}>
-            {statCards.map(s => (
-              <div key={s.label} className="mini-stat">
-                <div style={{ fontSize: '1.25rem' }}>{s.icon}</div>
-                <div className="mini-stat-value" style={{ marginTop: '0.25rem' }}>{s.value}</div>
-                <div className="mini-stat-label">{s.label}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* ── TABS ────────────────────────────────────────────────── */}
-        <div className="dashboard-tabs">
-          {tabs.map(t => (
-            <button key={t.id} className={`dashboard-tab${tab === t.id ? ' active' : ''}`} onClick={() => setTab(t.id)}>
-              {t.icon} {t.label}
+      <div className="dashboard-layout">
+        {/* SIDEBAR */}
+        <aside className="sidebar">
+          <div className="sidebar-section">Navigation</div>
+          {NAV.slice(0, 5).map(n => (
+            <button key={n.id} className={`sidebar-link${activeTab === n.id ? " active" : ""}`} onClick={() => setActiveTab(n.id)}>
+              {n.icon} {n.label}
+              {n.id === "bots" && <span className="dot" />}
             </button>
           ))}
-        </div>
+          <div className="sidebar-section">Account</div>
+          {NAV.slice(5).map(n => (
+            <button key={n.id} className={`sidebar-link${activeTab === n.id ? " active" : ""}`} onClick={() => setActiveTab(n.id)}>
+              {n.icon} {n.label}
+            </button>
+          ))}
+        </aside>
 
-        {/* ── OVERVIEW ────────────────────────────────────────────── */}
-        {tab === 'overview' && (
-          <div className="glass-card" style={{ padding: '1.5rem' }}>
-            <h3 style={{ color: 'var(--cyan)', fontFamily: 'Cinzel,serif', fontSize: '1rem', marginBottom: '1rem', fontWeight: 700 }}>Account Overview</h3>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px,1fr))', gap: '0.75rem' }}>
-              {[
-                ['Phone',      `+${phone}`],
-                ['Status',     p.banned ? '🚫 Banned' : '✅ Active'],
-                ['Role',       p.isAdmin ? 'Admin' : p.isMod ? 'Moderator' : 'Member'],
-                ['Joined',     p.joinedAt ? new Date(p.joinedAt as string).toLocaleDateString() : 'Unknown'],
-                ['Bank Limit', `₿ ${Number(p.bankLimit || 10000).toLocaleString()}`],
-                ['Net Worth',  `₿ ${netWorth.toLocaleString()}`],
-                ['Warnings',   String(p.warnings || 0)],
-              ].map(([k, v]) => (
-                <div key={k as string} style={{ background: 'rgba(0,0,0,0.3)', borderRadius: 10, padding: '0.85rem 1rem' }}>
-                  <div style={{ color: 'var(--text-muted)', fontSize: '0.73rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{k}</div>
-                  <div style={{ fontWeight: 600, marginTop: 4, fontSize: '0.9rem' }}>{v as string}</div>
+        {/* MAIN */}
+        <main className="dashboard-main">
+          {activeTab === "overview" && (
+            <>
+              <div className="dashboard-header">
+                <div>
+                  <h1 className="dashboard-title">Welcome back, {user?.username || "Adventurer"} ⚔️</h1>
+                  <p style={{ color: "var(--text-muted)", fontSize: "0.85rem", marginTop: "4px" }}>Here's what's happening across your bots today.</p>
                 </div>
-              ))}
-            </div>
-          </div>
-        )}
+                <button className="btn btn-cyan btn-sm" onClick={() => setActiveTab("bots")}>+ Add Bot</button>
+              </div>
 
-        {/* ── ACTIVITY ────────────────────────────────────────────── */}
-        {tab === 'activity' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-            {activities.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '4rem', color: 'var(--text-muted)' }}>
-                <div style={{ fontSize: '2.5rem', marginBottom: '0.75rem' }}>📜</div>
-                No activity recorded yet. Start using the bot to see your logs here.
-              </div>
-            ) : activities.map((a, i) => (
-              <div key={a._id || i} className="activity-item">
-                <div style={{ fontSize: '1.5rem', flexShrink: 0 }}>{a.icon || '📌'}</div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>{a.title || 'Activity'}</div>
-                  <div style={{ color: 'var(--text-dim)', fontSize: '0.82rem', marginTop: 2 }}>{a.description || 'No description'}</div>
-                  <div style={{ color: 'var(--text-muted)', fontSize: '0.73rem', marginTop: 4 }}>{a.createdAt ? new Date(a.createdAt).toLocaleString() : ''}</div>
-                </div>
-                {a.type && (
-                  <span style={{ background: 'var(--purple-dim)', border: '1px solid rgba(139,92,246,0.2)', borderRadius: 6, padding: '0.2rem 0.6rem', fontSize: '0.72rem', color: 'var(--purple)', whiteSpace: 'nowrap', alignSelf: 'flex-start' }}>
-                    {a.type}
-                  </span>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* ── INVENTORY ───────────────────────────────────────────── */}
-        {tab === 'inventory' && (
-          <div className="glass-card" style={{ padding: '1.5rem' }}>
-            <h3 style={{ color: 'var(--cyan)', fontFamily: 'Cinzel,serif', fontSize: '1rem', marginBottom: '1rem', fontWeight: 700 }}>🎒 Item Inventory</h3>
-            {inventory.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)' }}>
-                <div style={{ fontSize: '2.5rem', marginBottom: '0.75rem' }}>🎒</div>
-                Your inventory is empty. Earn items by completing quests!
-              </div>
-            ) : (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px,1fr))', gap: '0.75rem' }}>
-                {inventory.map((item, i) => (
-                  <div key={i} style={{ background: 'rgba(0,0,0,0.4)', border: '1px solid rgba(0,212,255,0.1)', borderRadius: 12, padding: '1rem', textAlign: 'center', transition: 'all 0.2s', cursor: 'default' }}>
-                    <div style={{ fontSize: '1.5rem' }}>📦</div>
-                    <div style={{ fontWeight: 600, marginTop: 4, fontSize: '0.85rem' }}>{item.item}</div>
-                    <div style={{ color: 'var(--cyan)', fontSize: '0.8rem', marginTop: 2 }}>×{item.qty}</div>
+              <div className="stats-grid">
+                {[
+                  { icon: "🤖", cls: "stat-icon-cyan", label: "Active Bots", value: "2", change: "↑ 1 this month", up: true },
+                  { icon: "👥", cls: "stat-icon-gold", label: "Total Groups", value: "36", change: "↑ 4 this week", up: true },
+                  { icon: "💬", cls: "stat-icon-purple", label: "Messages", value: fmtNum(215760), change: "↑ 12% vs last week", up: true },
+                  { icon: "⚠️", cls: "stat-icon-red", label: "Actions Taken", value: "1,247", change: "Spam blocks & kicks", up: false },
+                ].map(s => (
+                  <div key={s.label} className="glass-card stat-card">
+                    <div className={`stat-icon ${s.cls}`}>{s.icon}</div>
+                    <div>
+                      <div className="stat-label">{s.label}</div>
+                      <div className="stat-value">{s.value}</div>
+                      <div className={`stat-change ${s.up ? "up" : "down"}`}>{s.change}</div>
+                    </div>
                   </div>
                 ))}
               </div>
-            )}
-          </div>
-        )}
 
-        {/* ── LEADERBOARD ─────────────────────────────────────────── */}
-        {tab === 'leaderboard' && (
-          <div className="glass-card" style={{ padding: '1.5rem' }}>
-            <h3 style={{ color: 'var(--gold)', fontFamily: 'Cinzel,serif', fontSize: '1rem', marginBottom: '1rem', fontWeight: 700 }}>🏆 Global Leaderboard</h3>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-              {leaderboard.slice(0, 20).map((u, i) => {
-                const worth = u.netWorth ?? u.totalBalance ?? 0;
-                const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `#${u.rank}`;
-                const isMe = u.phone === phone;
-                const lbChar = charForIndex(i);
-                return (
-                  <div key={i} className={`leaderboard-row${isMe ? ' is-me' : ''}`}>
-                    <div style={{ width: 40, textAlign: 'center', fontWeight: 700, fontSize: '0.9rem', flexShrink: 0 }}>{medal}</div>
-                    {/* Real character image as leaderboard avatar */}
-                    <div style={{ width: 36, height: 36, borderRadius: '50%', overflow: 'hidden', border: `2px solid ${isMe ? lbChar.color : 'rgba(255,255,255,0.08)'}50`, background: 'rgba(0,0,20,0.7)', flexShrink: 0 }}>
-                      <img src={lbChar.img} alt={lbChar.name} style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'top center' }} loading="lazy" />
+              <div className="dashboard-grid">
+                <div className="glass-card" style={{ padding: "0" }}>
+                  <div style={{ padding: "18px 20px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    <h3 style={{ fontSize: "0.9rem", fontWeight: 600, color: "#fff" }}>🤖 Active Bots</h3>
+                    <button className="btn btn-outline btn-sm" onClick={() => setActiveTab("bots")}>Manage</button>
+                  </div>
+                  <div className="table-wrapper">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Bot Name</th>
+                          <th>Number</th>
+                          <th>Groups</th>
+                          <th>Status</th>
+                          <th>Messages</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {MOCK_BOTS.map(bot => (
+                          <tr key={bot.id}>
+                            <td style={{ fontWeight: 600, color: "var(--text-primary)" }}>{bot.name}</td>
+                            <td style={{ fontFamily: "monospace", color: "var(--cyan)", fontSize: "0.8rem" }}>{bot.number}</td>
+                            <td>{bot.groups}</td>
+                            <td><span className={`status-badge ${bot.status}`}>{bot.status}</span></td>
+                            <td>{fmtNum(bot.messagesHandled)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <div className="glass-card" style={{ padding: "0" }}>
+                  <div style={{ padding: "18px 20px", borderBottom: "1px solid var(--border)" }}>
+                    <h3 style={{ fontSize: "0.9rem", fontWeight: 600, color: "#fff" }}>⚡ Recent Activity</h3>
+                  </div>
+                  <div style={{ padding: "12px 16px", display: "flex", flexDirection: "column", gap: "2px" }}>
+                    {MOCK_ACTIVITY.map(a => (
+                      <div key={a.id} style={{ padding: "10px 8px", borderBottom: "1px solid rgba(255,255,255,0.03)", display: "flex", alignItems: "flex-start", gap: "10px" }}>
+                        <span style={{ fontSize: "1rem", flexShrink: 0, marginTop: "2px" }}>{a.icon}</span>
+                        <div>
+                          <p style={{ fontSize: "0.8rem", color: "var(--text-secondary)", lineHeight: 1.5 }}>{a.text}</p>
+                          <p style={{ fontSize: "0.72rem", color: "var(--text-muted)", marginTop: "2px" }}>{a.time}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
+
+          {activeTab === "bots" && (
+            <>
+              <div className="dashboard-header">
+                <h1 className="dashboard-title">🤖 My Bots</h1>
+                <button className="btn btn-cyan btn-sm">+ Connect New Bot</button>
+              </div>
+              <div className="stats-grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", marginBottom: "24px" }}>
+                {MOCK_BOTS.map(bot => (
+                  <div key={bot.id} className="glass-card" style={{ padding: "24px" }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "16px" }}>
+                      <span style={{ fontSize: "1.5rem" }}>🤖</span>
+                      <span className={`status-badge ${bot.status}`}>{bot.status}</span>
                     </div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontWeight: 600, fontSize: '0.9rem', color: isMe ? 'var(--cyan)' : 'var(--text-primary)' }}>{u.name}{isMe ? ' (You)' : ''}</div>
-                      <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>Level {u.level}</div>
+                    <h3 style={{ fontSize: "1rem", fontWeight: 600, color: "#fff", marginBottom: "4px" }}>{bot.name}</h3>
+                    <p style={{ fontSize: "0.78rem", fontFamily: "monospace", color: "var(--cyan)", marginBottom: "16px" }}>{bot.number}</p>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginBottom: "16px" }}>
+                      <div>
+                        <div className="stat-label">Groups</div>
+                        <div style={{ fontSize: "1.1rem", fontWeight: 700, color: "#fff" }}>{bot.groups}</div>
+                      </div>
+                      <div>
+                        <div className="stat-label">Messages</div>
+                        <div style={{ fontSize: "1.1rem", fontWeight: 700, color: "#fff" }}>{fmtNum(bot.messagesHandled)}</div>
+                      </div>
                     </div>
-                    <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                      <div style={{ fontWeight: 700, color: 'var(--gold)', fontSize: '0.9rem' }}>₿ {worth.toLocaleString()}</div>
-                      <div style={{ color: 'var(--text-muted)', fontSize: '0.72rem' }}>net worth</div>
+                    <div style={{ display: "flex", gap: "8px" }}>
+                      <button className="btn btn-outline btn-sm" style={{ flex: 1 }}>⚙️ Config</button>
+                      <button className="btn btn-ghost btn-sm">↺</button>
                     </div>
                   </div>
-                );
-              })}
+                ))}
+                <div className="glass-card" style={{ padding: "24px", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "12px", border: "2px dashed var(--border)", cursor: "pointer", minHeight: "200px" }}>
+                  <span style={{ fontSize: "2rem", opacity: 0.4 }}>+</span>
+                  <p style={{ color: "var(--text-muted)", fontSize: "0.85rem" }}>Connect New Bot</p>
+                  <button className="btn btn-cyan btn-sm">Get Started</button>
+                </div>
+              </div>
+            </>
+          )}
+
+          {(activeTab === "groups" || activeTab === "commands" || activeTab === "analytics" || activeTab === "billing" || activeTab === "settings") && (
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "400px", gap: "16px", textAlign: "center" }}>
+              <div style={{ fontSize: "3rem" }}>{NAV.find(n => n.id === activeTab)?.icon}</div>
+              <h2 style={{ fontSize: "1.4rem", fontWeight: 700, color: "#fff" }}>{NAV.find(n => n.id === activeTab)?.label}</h2>
+              <p style={{ color: "var(--text-secondary)", maxWidth: "360px" }}>
+                This section is coming soon. Connect your backend API to power this feature.
+              </p>
+              <button className="btn btn-outline btn-sm" onClick={() => setActiveTab("overview")}>← Back to Overview</button>
             </div>
-          </div>
-        )}
+          )}
+        </main>
       </div>
     </div>
   );

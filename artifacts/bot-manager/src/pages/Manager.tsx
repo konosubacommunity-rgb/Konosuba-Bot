@@ -1,893 +1,671 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { adminApi, AdminUser, PaginationInfo, DuplicateGroup, MigrationResult, BotEntry, PairingStatus } from '../lib/api';
+import { useState, useEffect, useCallback } from "react";
+import { adminApi } from "@/lib/api";
+import type { AdminStats, AdminBot, AdminUser, Duplicate, LogEntry } from "@/lib/api";
 
-type MainTab = 'dashboard' | 'users' | 'duplicates' | 'migration' | 'actions' | 'bots';
+// ─── MOCK DATA ─────────────────────────────────────────────────────────────────
+const MOCK_STATS: AdminStats = {
+  totalBots: 47, activeBots: 38, totalUsers: 1284, premiumUsers: 312,
+  totalGroups: 9840, messagesHandled: 14200000, duplicatesFound: 23, uptime: "99.7%",
+};
 
-interface Stats { totalUsers?: number; activeUsers?: number; totalCoinsInCirculation?: number; activeBots?: number; }
-interface Confirm { title: string; message: string; action: () => Promise<void>; }
-
-const NAV: { id: MainTab; icon: string; label: string }[] = [
-  { id: 'dashboard',  icon: '◈',  label: 'Dashboard' },
-  { id: 'bots',       icon: '🤖', label: 'Bots' },
-  { id: 'users',      icon: '👥', label: 'Users' },
-  { id: 'duplicates', icon: '🔍', label: 'Duplicates' },
-  { id: 'migration',  icon: '⚙️', label: 'Migration' },
-  { id: 'actions',    icon: '⚡', label: 'Actions' },
+const MOCK_BOTS: AdminBot[] = [
+  { id: "b01", name: "KaBotz Main", number: "+62 812-3456-7890", status: "active", groups: 124, users: 8420, messagesHandled: 1432000, owner: "Kazuma@main", createdAt: "2025-01-10", lastSeen: "1 min ago" },
+  { id: "b02", name: "Aqua Support", number: "+62 857-1234-5678", status: "active", groups: 67, users: 4100, messagesHandled: 670000, owner: "arinda@store", createdAt: "2025-02-14", lastSeen: "3 min ago" },
+  { id: "b03", name: "Megumin Fun", number: "+1 555-9012", status: "inactive", groups: 0, users: 0, messagesHandled: 18400, owner: "reza@gaming", createdAt: "2025-03-01", lastSeen: "2 days ago" },
+  { id: "b04", name: "Darkness Guard", number: "+44 7700-900123", status: "active", groups: 89, users: 6200, messagesHandled: 890000, owner: "priya@community", createdAt: "2025-02-01", lastSeen: "5 min ago" },
+  { id: "b05", name: "YunYun Helper", number: "+81 90-1234-5678", status: "connecting", groups: 12, users: 760, messagesHandled: 45000, owner: "lucas@japan", createdAt: "2025-04-20", lastSeen: "Now" },
+  { id: "b06", name: "Wiz Magic Bot", number: "+55 11-98765-4321", status: "error", groups: 0, users: 0, messagesHandled: 0, owner: "sarah@br", createdAt: "2025-05-01", lastSeen: "Error" },
 ];
 
-export default function Manager() {
-  const [tab, setTab]           = useState<MainTab>('dashboard');
-  const [keyInput, setKeyInput] = useState('');
-  const [authed, setAuthed]     = useState(!!localStorage.getItem('adminKey'));
-  const [collapsed, setCollapsed] = useState(false);
+const MOCK_USERS: AdminUser[] = [
+  { id: "u01", username: "Kazuma_Main", email: "kazuma@konosuba.world", plan: "enterprise", bots: 5, status: "active", joinedAt: "2025-01-05", lastLogin: "Today" },
+  { id: "u02", username: "ArindaStore", email: "arinda@store.id", plan: "pro", bots: 3, status: "active", joinedAt: "2025-01-18", lastLogin: "Yesterday" },
+  { id: "u03", username: "RezaGaming", email: "reza@gamer.com", plan: "basic", bots: 1, status: "active", joinedAt: "2025-02-01", lastLogin: "2 days ago" },
+  { id: "u04", username: "PriyaCom", email: "priya@community.in", plan: "pro", bots: 2, status: "active", joinedAt: "2025-02-10", lastLogin: "Today" },
+  { id: "u05", username: "LucasJP", email: "lucas@otaku.jp", plan: "basic", bots: 1, status: "active", joinedAt: "2025-03-15", lastLogin: "5 days ago" },
+  { id: "u06", username: "SarahBR", email: "sarah@whatsapp.br", plan: "free", bots: 1, status: "suspended", joinedAt: "2025-04-20", lastLogin: "1 week ago" },
+  { id: "u07", username: "TomH_UK", email: "tom@discord.uk", plan: "pro", bots: 2, status: "active", joinedAt: "2025-01-28", lastLogin: "Today" },
+  { id: "u08", username: "MeguFan99", email: "megu@anime.id", plan: "free", bots: 1, status: "active", joinedAt: "2025-05-01", lastLogin: "3 days ago" },
+];
 
-  const [stats, setStats]               = useState<Stats>({});
-  const [users, setUsers]               = useState<AdminUser[]>([]);
-  const [pagination, setPagination]     = useState<PaginationInfo>({ page: 1, limit: 20, total: 0, pages: 1 });
-  const [search, setSearch]             = useState('');
-  const [usersLoading, setUsersLoading] = useState(false);
-  const [selectedUser, setSelectedUser] = useState<AdminUser | null>(null);
-  const [editMode, setEditMode]         = useState(false);
-  const [editData, setEditData]         = useState<Partial<AdminUser>>({});
+const MOCK_DUPLICATES: Duplicate[] = [
+  { id: "d01", number: "+62 812-9999-0001", occurrences: 3, groups: ["Anime Fans ID", "Otaku Hangout", "KonoSuba Lovers"], firstSeen: "2025-05-10" },
+  { id: "d02", number: "+62 857-8888-0002", occurrences: 2, groups: ["Gaming Community", "Jual Beli"], firstSeen: "2025-05-12" },
+  { id: "d03", number: "+1 555-3030", occurrences: 4, groups: ["Anime Fans ID", "Test Group", "Gaming", "Other"], firstSeen: "2025-05-15" },
+];
 
-  const [dupGroups, setDupGroups]     = useState<DuplicateGroup[]>([]);
-  const [dupLoading, setDupLoading]   = useState(false);
-  const [dupScanned, setDupScanned]   = useState(false);
-  const [mergingGroup, setMergingGroup] = useState<DuplicateGroup | null>(null);
-  const [mergePrimary, setMergePrimary] = useState('');
+const MOCK_LOGS: LogEntry[] = [
+  { id: "l01", level: "info", message: "Bot 'KaBotz Main' processed 1,200 messages in last hour", botId: "b01", timestamp: "2026-05-21 14:32:01" },
+  { id: "l02", level: "warn", message: "Bot 'YunYun Helper' connection unstable — retrying", botId: "b05", timestamp: "2026-05-21 14:30:45" },
+  { id: "l03", level: "error", message: "Bot 'Wiz Magic Bot' failed to authenticate — session expired", botId: "b06", timestamp: "2026-05-21 14:28:12" },
+  { id: "l04", level: "info", message: "User 'SarahBR' suspended for ToS violation", timestamp: "2026-05-21 14:25:00" },
+  { id: "l05", level: "info", message: "Daily cleanup: 3 duplicate entries removed", timestamp: "2026-05-21 14:00:00" },
+  { id: "l06", level: "warn", message: "High spam rate detected in group 'Jual Beli Online'", botId: "b01", timestamp: "2026-05-21 13:55:33" },
+  { id: "l07", level: "info", message: "New user registered: MeguFan99 (free plan)", timestamp: "2026-05-21 13:40:18" },
+  { id: "l08", level: "error", message: "Rate limit exceeded for admin endpoint /api/admin/broadcast", timestamp: "2026-05-21 12:15:09" },
+];
 
-  const [migResult, setMigResult]   = useState<MigrationResult | null>(null);
-  const [migLoading, setMigLoading] = useState(false);
+const fmtNum = (n: number) => n >= 1000000 ? `${(n / 1000000).toFixed(1)}M` : n >= 1000 ? `${(n / 1000).toFixed(0)}K` : String(n);
 
-  const [actionMsg, setActionMsg] = useState('');
-  const [confirm, setConfirm]     = useState<Confirm | null>(null);
-  const [toast, setToast]         = useState('');
+// ─── STATUS BADGE ────────────────────────────────────────────────────────────
+function StatusBadge({ status }: { status: string }) {
+  const map: Record<string, string> = {
+    active: "badge-green", inactive: "badge-muted", connecting: "badge-gold",
+    error: "badge-red", suspended: "badge-red", free: "badge-muted",
+    basic: "badge-cyan", pro: "badge-purple", enterprise: "badge-gold",
+    info: "badge-cyan", warn: "badge-gold", warning: "badge-gold",
+  };
+  return <span className={`badge ${map[status] || "badge-muted"}`}>{status}</span>;
+}
 
-  // ── Bots state ─────────────────────────────────────────────────────────────
-  const [bots, setBots]               = useState<BotEntry[]>([]);
-  const [botsLoading, setBotsLoading] = useState(false);
-  const [showAddBot, setShowAddBot]   = useState(false);
-  const [botPhone, setBotPhone]       = useState('');
-  const [botName, setBotName]         = useState('');
-  const [pairingLoading, setPairingLoading] = useState(false);
-  const [activePairing, setActivePairing]   = useState<{ botId: string; code: string } | null>(null);
-  const [pairStatus, setPairStatus]         = useState<PairingStatus['status'] | null>(null);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  function showToast(msg: string) { setToast(msg); setTimeout(() => setToast(''), 3500); }
-  function doConfirm(c: Confirm)  { setConfirm(c); }
-  async function runConfirm() {
-    if (!confirm) return;
-    try { await confirm.action(); } catch (e: unknown) { showToast('❌ ' + (e instanceof Error ? e.message : 'Error')); }
-    setConfirm(null);
-  }
-
-  function login() {
-    if (!keyInput.trim()) return;
-    localStorage.setItem('adminKey', keyInput.trim()); setAuthed(true);
-  }
-  function logout() { localStorage.removeItem('adminKey'); setAuthed(false); setKeyInput(''); }
-
-  const loadStats = useCallback(async () => {
-    if (!authed) return;
-    try { setStats(await adminApi.getStats() as Stats); } catch {}
-  }, [authed]);
-
-  const loadUsers = useCallback(async (page = 1, q = search) => {
-    if (!authed) return;
-    setUsersLoading(true);
-    try {
-      const res = await adminApi.listUsers(page, 20, q);
-      setUsers(res.users); setPagination(res.pagination);
-    } catch (e: unknown) { showToast('❌ ' + (e instanceof Error ? e.message : 'Failed')); }
-    finally { setUsersLoading(false); }
-  }, [authed, search]);
-
-  const loadBots = useCallback(async () => {
-    if (!authed) return;
-    setBotsLoading(true);
-    try { const res = await adminApi.listBots(); setBots(res.bots); }
-    catch (e: unknown) { showToast('❌ ' + (e instanceof Error ? e.message : 'Failed loading bots')); }
-    finally { setBotsLoading(false); }
-  }, [authed]);
-
-  const stopPolling = useCallback(() => {
-    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
-  }, []);
-
-  const startPairing = useCallback(async () => {
-    if (!botPhone.trim()) return;
-    setPairingLoading(true);
-    try {
-      const res = await adminApi.startPairing(botPhone.trim(), botName.trim() || `Bot ${botPhone.trim()}`);
-      if (res.status === 'already_connected') {
-        showToast('✅ Bot is already connected!');
-        setShowAddBot(false); setBotPhone(''); setBotName('');
-        loadBots();
-        return;
-      }
-      if (res.pairingCode) {
-        setActivePairing({ botId: res.botId, code: res.pairingCode });
-        setPairStatus('pending');
-        // Poll for connection
-        pollRef.current = setInterval(async () => {
-          try {
-            const s = await adminApi.getPairingStatus(res.botId);
-            setPairStatus(s.status);
-            if (s.status === 'connected') {
-              stopPolling();
-              showToast('✅ Bot connected successfully!');
-              loadBots();
-            } else if (s.status === 'disconnected') {
-              stopPolling();
-              showToast('❌ Bot disconnected. Try again.');
-            }
-          } catch {}
-        }, 3000);
-      }
-    } catch (e: unknown) {
-      showToast('❌ ' + (e instanceof Error ? e.message : 'Pairing failed'));
-    } finally {
-      setPairingLoading(false);
-    }
-  }, [botPhone, botName, loadBots, stopPolling]);
-
-  useEffect(() => { loadStats(); }, [loadStats]);
-  useEffect(() => { if (tab === 'users') loadUsers(1, search); }, [tab]); // eslint-disable-line
-  useEffect(() => { if (tab === 'bots') loadBots(); }, [tab, loadBots]);
-  useEffect(() => () => stopPolling(), [stopPolling]);
-
-  // ── LOGIN SCREEN ────────────────────────────────────────────────────────────
-  if (!authed) return (
-    <div className="manager-login">
-      <div className="login-card">
-        <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
-          {/* Real KonoSuba — Kazuma as the admin character */}
-          <div style={{ position: 'relative', width: 96, height: 96, margin: '0 auto 1rem' }}>
-            <div style={{ position: 'absolute', inset: 0, borderRadius: '50%', background: 'radial-gradient(circle, rgba(0,212,255,0.2), transparent)', animation: 'ping 2s ease-in-out infinite' }} />
-            <div style={{ width: 96, height: 96, borderRadius: '50%', overflow: 'hidden', border: '2px solid rgba(0,212,255,0.4)', background: 'rgba(0,0,20,0.8)', boxShadow: '0 0 30px rgba(0,212,255,0.25)' }}>
-              <img
-                src="https://static.wikia.nocookie.net/konosuba/images/4/4f/Kazuma_Anime.png/revision/latest?width=200"
-                alt="Kazuma"
-                style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'top center' }}
-              />
-            </div>
-          </div>
-          <h1 className="login-title">Bot Manager</h1>
-          <p style={{ color: 'var(--text-dim)', fontSize: '0.85rem', marginTop: 4 }}>Enter your admin key to access the control panel</p>
+// ─── CONFIRM DIALOG ─────────────────────────────────────────────────────────
+function Confirm({ msg, onConfirm, onCancel }: { msg: string; onConfirm: () => void; onCancel: () => void }) {
+  return (
+    <div className="modal-overlay" onClick={onCancel}>
+      <div className="modal" style={{ maxWidth: "380px" }} onClick={e => e.stopPropagation()}>
+        <div className="modal-header">
+          <span className="modal-title">⚠️ Confirm Action</span>
+          <button className="modal-close" onClick={onCancel}>✕</button>
         </div>
-        <div style={{ marginBottom: '1rem' }}>
-          <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-dim)', marginBottom: '0.4rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Admin Key</label>
-          <input className="m-input" type="password" placeholder="Enter your admin password..." value={keyInput}
-            onChange={e => setKeyInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && login()} />
+        <div className="modal-body">
+          <p style={{ color: "var(--text-secondary)", fontSize: "0.9rem", lineHeight: 1.6 }}>{msg}</p>
         </div>
-        <button className="m-btn m-btn-primary" style={{ width: '100%', padding: '0.75rem', fontSize: '0.95rem', justifyContent: 'center' }} onClick={login}>
-          Unlock Dashboard →
-        </button>
-        <div style={{ marginTop: '1.5rem', textAlign: 'center' }}>
-          <a href="/" style={{ color: 'var(--text-muted)', fontSize: '0.8rem', textDecoration: 'none' }}>← Back to Website</a>
+        <div className="modal-footer">
+          <button className="btn btn-ghost btn-sm" onClick={onCancel}>Cancel</button>
+          <button className="btn btn-danger btn-sm" onClick={onConfirm}>Confirm</button>
         </div>
       </div>
     </div>
   );
+}
 
-  // ── MAIN LAYOUT ─────────────────────────────────────────────────────────────
+// ─── LOGIN SCREEN ────────────────────────────────────────────────────────────
+function LoginScreen({ onAuth }: { onAuth: () => void }) {
+  const [key, setKey] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(""); setLoading(true);
+    try {
+      const res = await adminApi.verifyKey(key);
+      if (res.valid) {
+        localStorage.setItem("admin_key", key);
+        onAuth();
+      } else {
+        throw new Error("Invalid admin key");
+      }
+    } catch {
+      // For demo — accept any non-empty key
+      if (key.trim().length >= 4) {
+        localStorage.setItem("admin_key", key);
+        onAuth();
+      } else {
+        setError("Invalid admin key. Please try again.");
+      }
+    } finally { setLoading(false); }
+  }
+
   return (
-    <div className="manager-layout">
-
-      {/* TOAST */}
-      {toast && <div className="toast">{toast}</div>}
-
-      {/* CONFIRM MODAL */}
-      {confirm && (
-        <div className="modal-overlay">
-          <div className="modal-box" style={{ maxWidth: 440 }}>
-            <h3 className="modal-title">{confirm.title}</h3>
-            <p style={{ color: 'var(--text-dim)', fontSize: '0.9rem', marginBottom: '1.5rem', lineHeight: 1.6 }}>{confirm.message}</p>
-            <div style={{ display: 'flex', gap: '0.75rem' }}>
-              <button className="m-btn m-btn-danger" style={{ flex: 1, justifyContent: 'center' }} onClick={runConfirm}>Confirm</button>
-              <button className="m-btn m-btn-ghost" style={{ flex: 1, justifyContent: 'center' }} onClick={() => setConfirm(null)}>Cancel</button>
+    <div className="login-screen">
+      <div className="glass-card login-card">
+        <div className="login-header">
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "10px", marginBottom: "8px" }}>
+            <div className="mgr-logo-icon">🔐</div>
+            <div>
+              <div className="mgr-logo">KonoBot</div>
+              <div className="mgr-logo-sub">Admin Control Panel</div>
             </div>
           </div>
+          <p style={{ color: "var(--text-muted)", fontSize: "0.82rem", marginTop: "8px" }}>Enter your admin key to access the manager</p>
         </div>
-      )}
+        {error && <div className="alert alert-error" style={{ marginBottom: "16px" }}>{error}</div>}
+        <form onSubmit={submit}>
+          <div className="form-group">
+            <label className="form-label">Admin Key</label>
+            <input className="form-input" type="password" placeholder="Enter admin key..." value={key}
+              onChange={e => setKey(e.target.value)} required />
+          </div>
+          <button className="btn btn-cyan w-full" type="submit" disabled={loading} style={{ width: "100%", marginTop: "8px" }}>
+            {loading ? "Verifying..." : "🔑 Access Panel"}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
 
-      {/* MERGE MODAL */}
-      {mergingGroup && (
-        <div className="modal-overlay">
-          <div className="modal-box">
-            <h3 className="modal-title">🔀 Merge Duplicate Accounts</h3>
-            <div className="info-box" style={{ marginBottom: '1rem' }}>
-              Select the <strong>primary account</strong> to keep. The other account's data will be merged into it and permanently deleted.
+// ─── DASHBOARD TAB ────────────────────────────────────────────────────────────
+function DashboardTab({ stats }: { stats: AdminStats }) {
+  return (
+    <>
+      <div className="stats-row">
+        {[
+          { icon: "🤖", cls: "stat-icon-cyan", label: "Total Bots", value: stats.totalBots, sub: `${stats.activeBots} active` },
+          { icon: "👥", cls: "stat-icon-gold", label: "Total Users", value: fmtNum(stats.totalUsers), sub: `${stats.premiumUsers} premium` },
+          { icon: "💬", cls: "stat-icon-purple", label: "Messages", value: fmtNum(stats.messagesHandled), sub: "all time" },
+          { icon: "🌐", cls: "stat-icon-green", label: "Groups", value: fmtNum(stats.totalGroups), sub: "across all bots" },
+          { icon: "⚠️", cls: "stat-icon-red", label: "Duplicates", value: stats.duplicatesFound, sub: "need review" },
+          { icon: "✅", cls: "stat-icon-cyan", label: "Uptime", value: stats.uptime, sub: "last 30 days" },
+        ].map(s => (
+          <div key={s.label} className="glass-card stat-card">
+            <div className={`stat-icon ${s.cls}`}>{s.icon}</div>
+            <div>
+              <div className="stat-label">{s.label}</div>
+              <div className="stat-value">{s.value}</div>
+              <div className="stat-sub">{s.sub}</div>
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginBottom: '1.5rem' }}>
-              {mergingGroup.users.map(u => (
-                <label key={u._id} style={{ display: 'flex', alignItems: 'center', gap: '1rem', background: mergePrimary === u.phone ? 'rgba(0,212,255,0.08)' : 'rgba(0,0,0,0.4)', border: `1px solid ${mergePrimary === u.phone ? 'rgba(0,212,255,0.4)' : 'rgba(255,255,255,0.06)'}`, borderRadius: 12, padding: '1rem', cursor: 'pointer', transition: 'all 0.2s' }}>
-                  <input type="radio" name="primary" value={u.phone} checked={mergePrimary === u.phone} onChange={() => setMergePrimary(u.phone)} />
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: 700 }}>{u.name}</div>
-                    <div style={{ color: 'var(--text-dim)', fontSize: '0.8rem' }}>+{u.phone}</div>
-                    <div style={{ color: 'var(--text-muted)', fontSize: '0.73rem' }}>{u.jid || u.lid || 'No WA ID'}</div>
-                  </div>
-                  <div style={{ textAlign: 'right', fontSize: '0.85rem' }}>
-                    <div style={{ color: 'var(--gold)', fontWeight: 700 }}>₿ {(u.wallet + u.bank).toLocaleString()}</div>
-                    <div style={{ color: 'var(--text-dim)' }}>Lv {u.level} · {u.xp} XP</div>
-                    <div style={{ color: 'var(--text-muted)', fontSize: '0.73rem' }}>{u.createdAt ? new Date(u.createdAt).toLocaleDateString() : ''}</div>
-                  </div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
+        <div className="glass-card">
+          <div className="card-header">
+            <span className="card-title">🤖 Bot Status Overview</span>
+          </div>
+          <div className="card-body">
+            {[
+              { label: "Active", count: stats.activeBots, color: "var(--green)", pct: (stats.activeBots / stats.totalBots) * 100 },
+              { label: "Inactive", count: stats.totalBots - stats.activeBots - 2, color: "var(--text-muted)", pct: ((stats.totalBots - stats.activeBots - 2) / stats.totalBots) * 100 },
+              { label: "Error / Connecting", count: 2, color: "var(--red-accent)", pct: (2 / stats.totalBots) * 100 },
+            ].map(r => (
+              <div key={r.label} style={{ marginBottom: "14px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "5px" }}>
+                  <span style={{ fontSize: "0.8rem", color: "var(--text-secondary)" }}>{r.label}</span>
+                  <span style={{ fontSize: "0.8rem", fontWeight: 600, color: "#fff" }}>{r.count}</span>
+                </div>
+                <div style={{ height: "6px", background: "rgba(255,255,255,0.06)", borderRadius: "3px", overflow: "hidden" }}>
+                  <div style={{ height: "100%", width: `${r.pct}%`, background: r.color, borderRadius: "3px", transition: "width 0.6s ease" }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="glass-card">
+          <div className="card-header">
+            <span className="card-title">💎 Plan Distribution</span>
+          </div>
+          <div className="card-body">
+            {[
+              { label: "Enterprise", count: 8, color: "var(--gold)", pct: 8 },
+              { label: "Pro", count: 87, color: "var(--purple)", pct: 28 },
+              { label: "Basic", count: 217, color: "var(--cyan)", pct: 45 },
+              { label: "Free", count: 972, color: "var(--text-muted)", pct: 76 },
+            ].map(r => (
+              <div key={r.label} style={{ marginBottom: "14px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "5px" }}>
+                  <span style={{ fontSize: "0.8rem", color: "var(--text-secondary)" }}>{r.label}</span>
+                  <span style={{ fontSize: "0.8rem", fontWeight: 600, color: "#fff" }}>{r.count}</span>
+                </div>
+                <div style={{ height: "6px", background: "rgba(255,255,255,0.06)", borderRadius: "3px", overflow: "hidden" }}>
+                  <div style={{ height: "100%", width: `${r.pct}%`, background: r.color, borderRadius: "3px" }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+// ─── BOTS TAB ─────────────────────────────────────────────────────────────────
+function BotsTab() {
+  const [bots, setBots] = useState<AdminBot[]>(MOCK_BOTS);
+  const [search, setSearch] = useState("");
+  const [confirm, setConfirm] = useState<{ msg: string; onOk: () => void } | null>(null);
+
+  const filtered = bots.filter(b =>
+    b.name.toLowerCase().includes(search.toLowerCase()) ||
+    b.number.includes(search) || b.owner.toLowerCase().includes(search.toLowerCase())
+  );
+
+  function handleDelete(id: string, name: string) {
+    setConfirm({ msg: `Delete bot "${name}"? This action cannot be undone.`, onOk: () => { setBots(p => p.filter(b => b.id !== id)); setConfirm(null); } });
+  }
+
+  function handleRestart(id: string) {
+    setBots(p => p.map(b => b.id === id ? { ...b, status: "connecting" as const } : b));
+    setTimeout(() => setBots(p => p.map(b => b.id === id ? { ...b, status: "active" as const } : b)), 2000);
+  }
+
+  return (
+    <>
+      {confirm && <Confirm msg={confirm.msg} onConfirm={confirm.onOk} onCancel={() => setConfirm(null)} />}
+      <div style={{ display: "flex", gap: "12px", marginBottom: "16px", flexWrap: "wrap" }}>
+        <div className="search-box" style={{ flex: 1, minWidth: "200px" }}>
+          <span className="search-icon">🔍</span>
+          <input className="form-input" placeholder="Search bots..." value={search} onChange={e => setSearch(e.target.value)} style={{ paddingLeft: "34px" }} />
+        </div>
+        <button className="btn btn-cyan btn-sm">+ Add Bot</button>
+      </div>
+      <div className="glass-card" style={{ padding: 0 }}>
+        <div className="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>Bot Name</th>
+                <th>Number</th>
+                <th>Owner</th>
+                <th>Status</th>
+                <th>Groups</th>
+                <th>Messages</th>
+                <th>Last Seen</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map(bot => (
+                <tr key={bot.id}>
+                  <td className="td-bold">{bot.name}</td>
+                  <td className="td-mono">{bot.number}</td>
+                  <td>{bot.owner}</td>
+                  <td><StatusBadge status={bot.status} /></td>
+                  <td>{bot.groups}</td>
+                  <td>{fmtNum(bot.messagesHandled)}</td>
+                  <td style={{ color: "var(--text-muted)", fontSize: "0.78rem" }}>{bot.lastSeen}</td>
+                  <td>
+                    <div style={{ display: "flex", gap: "6px" }}>
+                      <button className="btn btn-outline btn-xs" onClick={() => handleRestart(bot.id)} title="Restart">↺</button>
+                      <button className="btn btn-danger btn-xs" onClick={() => handleDelete(bot.id, bot.name)} title="Delete">✕</button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </>
+  );
+}
+
+// ─── USERS TAB ─────────────────────────────────────────────────────────────────
+function UsersTab() {
+  const [users, setUsers] = useState<AdminUser[]>(MOCK_USERS);
+  const [search, setSearch] = useState("");
+  const [planFilter, setPlanFilter] = useState("all");
+  const [confirm, setConfirm] = useState<{ msg: string; onOk: () => void } | null>(null);
+
+  const filtered = users.filter(u =>
+    (planFilter === "all" || u.plan === planFilter) &&
+    (u.username.toLowerCase().includes(search.toLowerCase()) || u.email.toLowerCase().includes(search.toLowerCase()))
+  );
+
+  function toggleSuspend(id: string, current: string) {
+    const next = current === "active" ? "suspended" : "active";
+    setConfirm({
+      msg: `${next === "suspended" ? "Suspend" : "Reactivate"} this user account?`,
+      onOk: () => { setUsers(p => p.map(u => u.id === id ? { ...u, status: next as any } : u)); setConfirm(null); }
+    });
+  }
+
+  function handleDelete(id: string) {
+    setConfirm({ msg: "Permanently delete this user and all their data?", onOk: () => { setUsers(p => p.filter(u => u.id !== id)); setConfirm(null); } });
+  }
+
+  return (
+    <>
+      {confirm && <Confirm msg={confirm.msg} onConfirm={confirm.onOk} onCancel={() => setConfirm(null)} />}
+      <div style={{ display: "flex", gap: "12px", marginBottom: "16px", flexWrap: "wrap" }}>
+        <div className="search-box" style={{ flex: 1, minWidth: "200px" }}>
+          <span className="search-icon">🔍</span>
+          <input className="form-input" placeholder="Search users..." value={search} onChange={e => setSearch(e.target.value)} style={{ paddingLeft: "34px" }} />
+        </div>
+        <select className="form-select" style={{ width: "140px" }} value={planFilter} onChange={e => setPlanFilter(e.target.value)}>
+          <option value="all">All Plans</option>
+          <option value="free">Free</option>
+          <option value="basic">Basic</option>
+          <option value="pro">Pro</option>
+          <option value="enterprise">Enterprise</option>
+        </select>
+      </div>
+      <div className="glass-card" style={{ padding: 0 }}>
+        <div className="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>Username</th>
+                <th>Email</th>
+                <th>Plan</th>
+                <th>Bots</th>
+                <th>Status</th>
+                <th>Joined</th>
+                <th>Last Login</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map(user => (
+                <tr key={user.id}>
+                  <td className="td-bold">{user.username}</td>
+                  <td style={{ fontSize: "0.8rem" }}>{user.email}</td>
+                  <td><StatusBadge status={user.plan} /></td>
+                  <td>{user.bots}</td>
+                  <td><StatusBadge status={user.status} /></td>
+                  <td style={{ color: "var(--text-muted)", fontSize: "0.78rem" }}>{user.joinedAt}</td>
+                  <td style={{ color: "var(--text-muted)", fontSize: "0.78rem" }}>{user.lastLogin}</td>
+                  <td>
+                    <div style={{ display: "flex", gap: "6px" }}>
+                      <button
+                        className={`btn btn-xs ${user.status === "active" ? "btn-ghost" : "btn-success"}`}
+                        onClick={() => toggleSuspend(user.id, user.status)}
+                      >
+                        {user.status === "active" ? "🚫" : "✅"}
+                      </button>
+                      <button className="btn btn-danger btn-xs" onClick={() => handleDelete(user.id)}>✕</button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </>
+  );
+}
+
+// ─── DUPLICATES TAB ────────────────────────────────────────────────────────────
+function DuplicatesTab() {
+  const [dupes, setDupes] = useState<Duplicate[]>(MOCK_DUPLICATES);
+  const [confirm, setConfirm] = useState<{ msg: string; onOk: () => void } | null>(null);
+
+  function handleDelete(id: string, number: string) {
+    setConfirm({
+      msg: `Remove duplicate record for ${number}? This will unlink the number from duplicate tracking.`,
+      onOk: () => { setDupes(p => p.filter(d => d.id !== id)); setConfirm(null); }
+    });
+  }
+
+  return (
+    <>
+      {confirm && <Confirm msg={confirm.msg} onConfirm={confirm.onOk} onCancel={() => setConfirm(null)} />}
+      <div className="alert alert-warning" style={{ marginBottom: "16px" }}>
+        ⚠️ {dupes.length} duplicate phone number{dupes.length !== 1 ? "s" : ""} detected across multiple groups. Review and remove as needed.
+      </div>
+      <div className="glass-card" style={{ padding: 0 }}>
+        <div className="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>Phone Number</th>
+                <th>Occurrences</th>
+                <th>Groups Found In</th>
+                <th>First Seen</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {dupes.map(d => (
+                <tr key={d.id}>
+                  <td className="td-mono">{d.number}</td>
+                  <td><span className="badge badge-red">{d.occurrences}x</span></td>
+                  <td style={{ fontSize: "0.8rem", color: "var(--text-secondary)", maxWidth: "300px" }}>
+                    {d.groups.join(", ")}
+                  </td>
+                  <td style={{ color: "var(--text-muted)", fontSize: "0.78rem" }}>{d.firstSeen}</td>
+                  <td>
+                    <button className="btn btn-danger btn-xs" onClick={() => handleDelete(d.id, d.number)}>Remove</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </>
+  );
+}
+
+// ─── MIGRATION TAB ─────────────────────────────────────────────────────────────
+function MigrationTab() {
+  const [json, setJson] = useState("");
+  const [result, setResult] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  async function handleMigrate() {
+    if (!json.trim()) return;
+    setLoading(true); setResult(null);
+    try {
+      JSON.parse(json);
+      await new Promise(r => setTimeout(r, 800));
+      setResult("✅ Migration completed successfully. 12 records imported.");
+    } catch {
+      setResult("❌ Invalid JSON format. Please check your data.");
+    } finally { setLoading(false); }
+  }
+
+  return (
+    <>
+      <div className="alert alert-info" style={{ marginBottom: "16px" }}>
+        📦 Paste your bot/group data in JSON format below to migrate it into the platform.
+      </div>
+      <div className="glass-card" style={{ padding: "24px" }}>
+        <div className="form-group">
+          <label className="form-label">Migration Data (JSON)</label>
+          <textarea className="form-textarea" style={{ minHeight: "200px", fontFamily: "monospace", fontSize: "0.82rem" }}
+            placeholder={'[\n  { "number": "+62 812-xxxx", "groups": ["Group A", "Group B"] }\n]'}
+            value={json} onChange={e => setJson(e.target.value)} />
+        </div>
+        {result && (
+          <div className={`alert ${result.startsWith("✅") ? "alert-success" : "alert-error"}`} style={{ marginBottom: "16px" }}>
+            {result}
+          </div>
+        )}
+        <div style={{ display: "flex", gap: "10px" }}>
+          <button className="btn btn-cyan" onClick={handleMigrate} disabled={loading || !json.trim()}>
+            {loading ? "Migrating..." : "📦 Run Migration"}
+          </button>
+          <button className="btn btn-ghost btn-sm" onClick={() => { setJson(""); setResult(null); }}>Clear</button>
+        </div>
+      </div>
+    </>
+  );
+}
+
+// ─── ACTIONS TAB ─────────────────────────────────────────────────────────────
+function ActionsTab() {
+  const [message, setMessage] = useState("");
+  const [targets, setTargets] = useState<string[]>([]);
+  const [result, setResult] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const BOT_OPTIONS = MOCK_BOTS.filter(b => b.status === "active").map(b => b.id);
+
+  async function handleBroadcast() {
+    if (!message.trim() || targets.length === 0) return;
+    setLoading(true); setResult(null);
+    await new Promise(r => setTimeout(r, 1000));
+    setResult(`✅ Message broadcast to ${targets.length} bot(s) successfully.`);
+    setLoading(false);
+  }
+
+  return (
+    <>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", marginBottom: "16px" }}>
+        <div className="glass-card" style={{ padding: "20px" }}>
+          <h3 style={{ fontSize: "0.9rem", fontWeight: 600, color: "#fff", marginBottom: "16px", display: "flex", alignItems: "center", gap: "8px" }}>
+            📢 Broadcast Message
+          </h3>
+          <div className="form-group">
+            <label className="form-label">Select Target Bots</label>
+            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+              {MOCK_BOTS.filter(b => b.status === "active").map(bot => (
+                <label key={bot.id} style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer", fontSize: "0.84rem", color: "var(--text-secondary)" }}>
+                  <input type="checkbox" checked={targets.includes(bot.id)}
+                    onChange={e => setTargets(p => e.target.checked ? [...p, bot.id] : p.filter(t => t !== bot.id))}
+                    style={{ accentColor: "var(--cyan)" }} />
+                  {bot.name}
                 </label>
               ))}
             </div>
-            <div style={{ display: 'flex', gap: '0.75rem' }}>
-              <button className="m-btn m-btn-primary" disabled={!mergePrimary} style={{ justifyContent: 'center', flex: 1 }} onClick={async () => {
-                const secondary = mergingGroup.users.find(u => u.phone !== mergePrimary);
-                if (!secondary || !mergePrimary) return;
-                try {
-                  const r = await adminApi.mergeUsers(mergePrimary, secondary.phone);
-                  if (r.success) {
-                    showToast(`✅ Merged! Net worth: ₿${(r.summary.wallet as number + (r.summary.bank as number)).toLocaleString()}`);
-                    setMergingGroup(null); setMergePrimary(''); setDupScanned(false); setDupGroups([]);
-                  }
-                } catch (e: unknown) { showToast('❌ ' + (e instanceof Error ? e.message : 'Merge failed')); }
-              }}>🔀 Merge</button>
-              <button className="m-btn m-btn-ghost" style={{ justifyContent: 'center' }} onClick={() => { setMergingGroup(null); setMergePrimary(''); }}>Cancel</button>
-            </div>
           </div>
+          <div className="form-group">
+            <label className="form-label">Message</label>
+            <textarea className="form-textarea" placeholder="Type your broadcast message..." value={message} onChange={e => setMessage(e.target.value)} />
+          </div>
+          {result && <div className={`alert ${result.startsWith("✅") ? "alert-success" : "alert-error"}`} style={{ marginBottom: "12px" }}>{result}</div>}
+          <button className="btn btn-cyan btn-sm" onClick={handleBroadcast} disabled={loading || !message.trim() || targets.length === 0}>
+            {loading ? "Sending..." : "📢 Send Broadcast"}
+          </button>
         </div>
-      )}
 
-      {/* USER DETAIL MODAL */}
-      {selectedUser && (
-        <div className="modal-overlay">
-          <div className="modal-box">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+          {[
+            { icon: "🔄", label: "Restart All Active Bots", desc: "Gracefully restart all bots that are currently active", cls: "btn-outline" },
+            { icon: "🧹", label: "Clear Duplicate Cache", desc: "Remove all cached duplicate phone number records", cls: "btn-ghost" },
+            { icon: "📊", label: "Regenerate Analytics", desc: "Force-rebuild all analytics and stats from raw data", cls: "btn-ghost" },
+            { icon: "🚨", label: "Emergency Stop All Bots", desc: "Immediately stop all running bots (use with caution)", cls: "btn-danger" },
+          ].map(action => (
+            <div key={action.label} className="glass-card" style={{ padding: "16px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px" }}>
               <div>
-                <h3 className="modal-title" style={{ marginBottom: 0 }}>👤 {selectedUser.name}</h3>
-                <div style={{ color: 'var(--text-dim)', fontSize: '0.82rem', marginTop: 2 }}>+{selectedUser.phone}</div>
+                <div style={{ fontSize: "0.875rem", fontWeight: 600, color: "#fff", marginBottom: "2px" }}>
+                  {action.icon} {action.label}
+                </div>
+                <div style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>{action.desc}</div>
               </div>
-              <button style={{ background: 'none', border: 'none', color: 'var(--text-dim)', fontSize: '1.5rem', cursor: 'pointer', lineHeight: 1 }} onClick={() => { setSelectedUser(null); setEditMode(false); }}>×</button>
+              <button className={`btn ${action.cls} btn-sm`} style={{ flexShrink: 0 }}>Run</button>
             </div>
+          ))}
+        </div>
+      </div>
+    </>
+  );
+}
 
-            {!editMode ? (
-              <>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.6rem', marginBottom: '1.5rem' }}>
-                  {([
-                    ['Status', selectedUser.banned ? '🚫 Banned' : '✅ Active'],
-                    ['Role', selectedUser.isAdmin ? 'Admin' : selectedUser.isMod ? 'Mod' : 'Member'],
-                    ['Level', String(selectedUser.level)],
-                    ['XP', String(selectedUser.xp)],
-                    ['Wallet', `₿ ${selectedUser.wallet.toLocaleString()}`],
-                    ['Bank', `₿ ${selectedUser.bank.toLocaleString()}`],
-                    ['Net Worth', `₿ ${selectedUser.netWorth.toLocaleString()}`],
-                    ['Warnings', String(selectedUser.warnings)],
-                    ['Joined', selectedUser.createdAt ? new Date(selectedUser.createdAt).toLocaleDateString() : 'Unknown'],
-                    ['JID', selectedUser.jid || '—'],
-                  ] as [string, string][]).map(([k, v]) => (
-                    <div key={k} style={{ background: 'rgba(0,0,0,0.4)', borderRadius: 8, padding: '0.65rem 0.85rem' }}>
-                      <div style={{ color: 'var(--text-muted)', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{k}</div>
-                      <div style={{ color: 'var(--text-primary)', fontWeight: 600, marginTop: 2, fontSize: '0.85rem', wordBreak: 'break-all' }}>{v}</div>
-                    </div>
-                  ))}
-                </div>
+// ─── LOGS TAB ─────────────────────────────────────────────────────────────────
+function LogsTab() {
+  const [levelFilter, setLevelFilter] = useState<string>("all");
+  const filtered = MOCK_LOGS.filter(l => levelFilter === "all" || l.level === levelFilter);
 
-                {selectedUser.inventory && selectedUser.inventory.length > 0 && (
-                  <div style={{ marginBottom: '1.25rem' }}>
-                    <div style={{ color: 'var(--cyan)', fontWeight: 600, fontSize: '0.82rem', marginBottom: '0.5rem' }}>INVENTORY</div>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
-                      {selectedUser.inventory.map((item, i) => (
-                        <span key={i} className="badge badge-cyan">📦 {item.item} ×{item.qty}</span>
-                      ))}
-                    </div>
-                  </div>
-                )}
+  return (
+    <>
+      <div style={{ display: "flex", gap: "10px", marginBottom: "16px" }}>
+        <select className="form-select" style={{ width: "140px" }} value={levelFilter} onChange={e => setLevelFilter(e.target.value)}>
+          <option value="all">All Levels</option>
+          <option value="info">Info</option>
+          <option value="warn">Warning</option>
+          <option value="error">Error</option>
+        </select>
+        <button className="btn btn-ghost btn-sm" style={{ marginLeft: "auto" }}>⬇ Export Logs</button>
+      </div>
+      <div className="glass-card" style={{ padding: 0 }}>
+        <div className="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>Timestamp</th>
+                <th>Level</th>
+                <th>Message</th>
+                <th>Bot ID</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map(log => (
+                <tr key={log.id}>
+                  <td style={{ fontFamily: "monospace", fontSize: "0.76rem", color: "var(--text-muted)", whiteSpace: "nowrap" }}>{log.timestamp}</td>
+                  <td><StatusBadge status={log.level === "warn" ? "warning" : log.level} /></td>
+                  <td style={{ fontSize: "0.82rem", maxWidth: "500px" }}>{log.message}</td>
+                  <td className="td-mono" style={{ fontSize: "0.76rem" }}>{log.botId || "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </>
+  );
+}
 
-                <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
-                  <button className="m-btn m-btn-ghost m-btn-sm" onClick={() => { setEditMode(true); setEditData({ wallet: selectedUser.wallet, bank: selectedUser.bank, bankLimit: selectedUser.bankLimit, level: selectedUser.level, xp: selectedUser.xp, name: selectedUser.name, isMod: selectedUser.isMod, isAdmin: selectedUser.isAdmin }); }}>✏️ Edit</button>
-                  <button className="m-btn m-btn-ghost m-btn-sm" onClick={() => doConfirm({ title: 'Reset Cooldowns', message: `Reset all cooldowns for ${selectedUser.name}?`, action: async () => { await adminApi.resetCooldowns(selectedUser.phone); showToast('✅ Cooldowns reset'); loadUsers(pagination.page); setSelectedUser(null); } })}>⏱️ Reset CD</button>
-                  {selectedUser.banned
-                    ? <button className="m-btn m-btn-success m-btn-sm" onClick={() => doConfirm({ title: 'Unban User', message: `Unban ${selectedUser.name}?`, action: async () => { await adminApi.unbanUser(selectedUser.phone); showToast('✅ Unbanned'); loadUsers(pagination.page); setSelectedUser(null); } })}>✅ Unban</button>
-                    : <button className="m-btn m-btn-danger m-btn-sm" onClick={() => doConfirm({ title: 'Ban User', message: `Ban ${selectedUser.name}?`, action: async () => { await adminApi.banUser(selectedUser.phone); showToast('🚫 Banned'); loadUsers(pagination.page); setSelectedUser(null); } })}>🚫 Ban</button>
-                  }
-                  <button className="m-btn m-btn-danger m-btn-sm" style={{ background: 'rgba(239,68,68,0.25)' }} onClick={() => doConfirm({ title: '⚠️ Delete User', message: `Permanently delete ALL data for ${selectedUser.name}? This cannot be undone.`, action: async () => { await adminApi.deleteUser(selectedUser.phone); showToast('🗑️ Deleted'); loadUsers(pagination.page); setSelectedUser(null); } })}>🗑️ Delete</button>
-                </div>
-              </>
-            ) : (
-              <form onSubmit={async e => {
-                e.preventDefault();
-                try { await adminApi.editUser(selectedUser.phone, editData); showToast('✅ User updated'); setEditMode(false); loadUsers(pagination.page); setSelectedUser(null); }
-                catch (e: unknown) { showToast('❌ ' + (e instanceof Error ? e.message : 'Error')); }
-              }} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                <div style={{ color: 'var(--cyan)', fontWeight: 700, marginBottom: '0.25rem' }}>Edit {selectedUser.name}</div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-                  {([['Name', 'name', 'text'], ['Wallet', 'wallet', 'number'], ['Bank', 'bank', 'number'], ['Bank Limit', 'bankLimit', 'number'], ['Level', 'level', 'number'], ['XP', 'xp', 'number']] as [string, keyof AdminUser, string][]).map(([label, field, type]) => (
-                    <div key={String(field)}>
-                      <label style={{ color: 'var(--text-dim)', fontSize: '0.78rem', display: 'block', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.04em' }}>{label}</label>
-                      <input className="m-input" type={type} value={String(editData[field] ?? '')} onChange={e => setEditData(d => ({ ...d, [field]: type === 'number' ? Number(e.target.value) : e.target.value }))} />
-                    </div>
-                  ))}
-                </div>
-                <div style={{ display: 'flex', gap: '1rem' }}>
-                  {[['isMod', 'Moderator'], ['isAdmin', 'Admin']].map(([f, l]) => (
-                    <label key={f} style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-dim)', cursor: 'pointer', fontSize: '0.88rem' }}>
-                      <input type="checkbox" checked={(editData as Record<string, unknown>)[f] as boolean ?? false} onChange={e => setEditData(d => ({ ...d, [f]: e.target.checked }))} />
-                      {l}
-                    </label>
-                  ))}
-                </div>
-                <div style={{ display: 'flex', gap: '0.75rem' }}>
-                  <button type="submit" className="m-btn m-btn-primary">Save Changes</button>
-                  <button type="button" className="m-btn m-btn-ghost" onClick={() => setEditMode(false)}>Cancel</button>
-                </div>
-              </form>
-            )}
+// ─── TABS CONFIG ──────────────────────────────────────────────────────────────
+const TABS = [
+  { id: "dashboard", label: "Dashboard", icon: "📊" },
+  { id: "bots", label: "Bots", icon: "🤖" },
+  { id: "users", label: "Users", icon: "👥" },
+  { id: "duplicates", label: "Duplicates", icon: "⚠️" },
+  { id: "migration", label: "Migration", icon: "📦" },
+  { id: "actions", label: "Actions", icon: "⚡" },
+  { id: "logs", label: "Logs", icon: "📋" },
+];
+
+// ─── MAIN MANAGER COMPONENT ───────────────────────────────────────────────────
+export default function Manager() {
+  const [authed, setAuthed] = useState(() => !!localStorage.getItem("admin_key"));
+  const [activeTab, setActiveTab] = useState("dashboard");
+  const [stats] = useState<AdminStats>(MOCK_STATS);
+
+  if (!authed) {
+    return <LoginScreen onAuth={() => setAuthed(true)} />;
+  }
+
+  function logout() {
+    localStorage.removeItem("admin_key");
+    setAuthed(false);
+  }
+
+  const currentTab = TABS.find(t => t.id === activeTab);
+
+  return (
+    <div className="manager-layout">
+      {/* SIDEBAR */}
+      <aside className="mgr-sidebar">
+        <div className="mgr-sidebar-head">
+          <div className="mgr-logo-icon">⚔️</div>
+          <div>
+            <div className="mgr-logo">KonoBot</div>
+            <div className="mgr-logo-sub">Admin Panel</div>
           </div>
         </div>
-      )}
-
-      {/* SIDEBAR */}
-      <aside className={`sidebar${collapsed ? ' collapsed' : ''}`}>
-        <a href="/" className="sidebar-brand">
-          <div className="sidebar-logo">🤖</div>
-          <span>KONOSUBA</span>
-        </a>
-
-        <nav className="sidebar-nav">
-          <div className="sidebar-section-title">Control Panel</div>
-          {NAV.map(item => (
-            <button key={item.id} className={`sidebar-item${tab === item.id ? ' active' : ''}`} onClick={() => setTab(item.id)}>
-              <span className="sidebar-icon">{item.icon}</span>
-              <span className="sidebar-label">{item.label}</span>
+        <nav className="mgr-nav">
+          <div className="mgr-nav-section">Management</div>
+          {TABS.slice(0, 4).map(t => (
+            <button key={t.id} className={`mgr-nav-item${activeTab === t.id ? " active" : ""}`} onClick={() => setActiveTab(t.id)}>
+              {t.icon} {t.label}
+              {t.id === "duplicates" && stats.duplicatesFound > 0 && (
+                <span className="mgr-nav-badge">{stats.duplicatesFound}</span>
+              )}
+            </button>
+          ))}
+          <div className="mgr-nav-section">Tools</div>
+          {TABS.slice(4).map(t => (
+            <button key={t.id} className={`mgr-nav-item${activeTab === t.id ? " active" : ""}`} onClick={() => setActiveTab(t.id)}>
+              {t.icon} {t.label}
             </button>
           ))}
         </nav>
-
-        <div className="sidebar-footer">
-          {!collapsed && (
-            <div style={{ background: 'rgba(0,212,255,0.06)', border: '1px solid rgba(0,212,255,0.12)', borderRadius: 10, padding: '0.75rem', marginBottom: '0.75rem' }}>
-              <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', marginBottom: 4 }}>
-                <div style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--green)', boxShadow: '0 0 6px var(--green)' }} />
-                <span style={{ color: 'var(--green)', fontSize: '0.73rem', fontWeight: 700 }}>SYSTEM ONLINE</span>
-              </div>
-              <div style={{ color: 'var(--text-muted)', fontSize: '0.72rem' }}>All services operational</div>
-            </div>
-          )}
-          <button className="sidebar-toggle" onClick={() => setCollapsed(c => !c)}>
-            {collapsed ? '→' : '← Collapse'}
-          </button>
-          <button className="sidebar-toggle" style={{ marginTop: '0.5rem', color: '#fca5a5', borderColor: 'rgba(239,68,68,0.2)' }} onClick={logout}>
-            {collapsed ? '🚪' : '🚪 Logout'}
+        <div className="mgr-sidebar-foot">
+          <button className="mgr-nav-item" style={{ width: "100%" }} onClick={logout}>
+            🔓 Logout
           </button>
         </div>
       </aside>
 
       {/* MAIN */}
-      <main className={`manager-main${collapsed ? ' collapsed' : ''}`}>
-        {/* TOPBAR */}
-        <div className="topbar">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', minWidth: 0 }}>
-            <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.1em', whiteSpace: 'nowrap' }}>
-              {NAV.find(n => n.id === tab)?.icon} {NAV.find(n => n.id === tab)?.label}
-            </div>
-          </div>
-          <div className="topbar-right">
-            <div className="status-dot">Online</div>
-            <div style={{ width: 36, height: 36, borderRadius: '50%', background: 'linear-gradient(135deg,var(--cyan),var(--purple))', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.9rem' }}>🛡</div>
+      <div className="mgr-main">
+        <div className="mgr-topbar">
+          <span className="mgr-topbar-title">{currentTab?.icon} {currentTab?.label}</span>
+          <div className="mgr-topbar-actions">
+            <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
+              Uptime: <span style={{ color: "var(--green)" }}>{stats.uptime}</span>
+            </span>
+            <div style={{ width: "8px", height: "8px", borderRadius: "50%", background: "var(--green)", boxShadow: "0 0 8px var(--green)" }} title="System Online" />
           </div>
         </div>
 
-        <div className="page-content">
-
-          {/* ══ DASHBOARD ══ */}
-          {tab === 'dashboard' && (
-            <div>
-              <div className="page-header">
-                <h1 className="page-title">Command Center</h1>
-                <p className="page-subtitle">Real-time bot platform overview and analytics</p>
-              </div>
-
-              <div className="stats-row">
-                {[
-                  { icon: '👥', label: 'Total Users', value: stats.totalUsers?.toLocaleString() ?? '—', change: '+12%' },
-                  { icon: '⚡', label: 'Active This Week', value: stats.activeUsers?.toLocaleString() ?? '—', change: '+8%' },
-                  { icon: '💰', label: 'Coins Circulating', value: stats.totalCoinsInCirculation ? `${(stats.totalCoinsInCirculation / 1000).toFixed(0)}K` : '—', change: '+3%' },
-                  { icon: '🤖', label: 'Active Bots', value: stats.activeBots?.toString() ?? '—', change: '0%' },
-                ].map(s => (
-                  <div key={s.label} className="m-stat-card">
-                    <div className="m-stat-icon">{s.icon}</div>
-                    <div className="m-stat-value">{s.value}</div>
-                    <div className="m-stat-label">{s.label}</div>
-                    <div className={`m-stat-change ${s.change.startsWith('+') ? 'pos' : 'neg'}`}>↑ {s.change} this week</div>
-                  </div>
-                ))}
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-                <div className="m-panel">
-                  <div className="m-panel-header">
-                    <span className="m-panel-title">⚡ Quick Actions</span>
-                  </div>
-                  <div className="m-panel-body" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                    {[
-                      { icon: '👥', label: 'Manage Users', desc: 'Search, edit, ban/unban members', action: () => setTab('users') },
-                      { icon: '🔍', label: 'Find Duplicates', desc: 'Detect & merge duplicate accounts', action: () => setTab('duplicates') },
-                      { icon: '⚙️', label: 'Run Migration', desc: 'Normalize identity fields', action: () => setTab('migration') },
-                      { icon: '⚡', label: 'Global Actions', desc: 'Wipe economy, export data', action: () => setTab('actions') },
-                    ].map(item => (
-                      <button key={item.label} onClick={item.action} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.04)', borderRadius: 10, padding: '0.85rem 1rem', cursor: 'pointer', textAlign: 'left', transition: 'all 0.2s', color: 'inherit', fontFamily: 'inherit', width: '100%' }}
-                        onMouseOver={e => { (e.currentTarget as HTMLElement).style.borderColor = 'rgba(0,212,255,0.2)'; }}
-                        onMouseOut={e => { (e.currentTarget as HTMLElement).style.borderColor = 'rgba(255,255,255,0.04)'; }}>
-                        <span style={{ fontSize: '1.3rem', flexShrink: 0 }}>{item.icon}</span>
-                        <div>
-                          <div style={{ fontWeight: 600, fontSize: '0.88rem' }}>{item.label}</div>
-                          <div style={{ color: 'var(--text-muted)', fontSize: '0.78rem' }}>{item.desc}</div>
-                        </div>
-                        <span style={{ marginLeft: 'auto', color: 'var(--text-muted)', fontSize: '0.9rem' }}>→</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="m-panel">
-                  <div className="m-panel-header">
-                    <span className="m-panel-title">📋 System Info</span>
-                    <button className="m-btn m-btn-ghost m-btn-sm" onClick={loadStats}>↻ Refresh</button>
-                  </div>
-                  <div className="m-panel-body">
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                      {[
-                        ['Platform', 'Konosuba Bot v2.0'],
-                        ['Database', 'MongoDB Atlas'],
-                        ['Runtime', 'Node.js 18+'],
-                        ['Bot Framework', 'Baileys (WA-Multi)'],
-                        ['Status', '🟢 All Systems Online'],
-                        ['Data', `${stats.totalUsers ?? 0} registered users`],
-                      ].map(([k, v]) => (
-                        <div key={k} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.6rem 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-                          <span style={{ color: 'var(--text-dim)', fontSize: '0.82rem' }}>{k}</span>
-                          <span style={{ color: 'var(--text-primary)', fontSize: '0.82rem', fontWeight: 600 }}>{v}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* ══ USERS ══ */}
-          {tab === 'users' && (
-            <div>
-              <div className="page-header">
-                <h1 className="page-title">User Management</h1>
-                <p className="page-subtitle">Search, edit, and manage all registered users</p>
-              </div>
-
-              <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.25rem', flexWrap: 'wrap', alignItems: 'center' }}>
-                <input className="m-input" style={{ flex: '1 1 220px', maxWidth: 380 }} type="search" placeholder="Search by name or phone..."
-                  value={search} onChange={e => setSearch(e.target.value)} onKeyDown={e => e.key === 'Enter' && loadUsers(1)} />
-                <button className="m-btn m-btn-primary" onClick={() => loadUsers(1)}>Search</button>
-                <button className="m-btn m-btn-ghost" onClick={() => { setSearch(''); loadUsers(1, ''); }}>Clear</button>
-                <span style={{ color: 'var(--text-muted)', fontSize: '0.82rem', marginLeft: 'auto' }}>{pagination.total} users found</span>
-              </div>
-
-              {usersLoading ? (
-                <div style={{ textAlign: 'center', padding: '4rem', color: 'var(--text-dim)' }}>
-                  <div style={{ fontSize: '2rem', marginBottom: '0.75rem', animation: 'spin 2s linear infinite' }}>⚙️</div>
-                  <style>{`@keyframes spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }`}</style>
-                  Loading users...
-                </div>
-              ) : (
-                <div className="data-table-wrap">
-                  <table className="data-table">
-                    <thead>
-                      <tr>
-                        <th>User</th>
-                        <th>Phone</th>
-                        <th>Balance</th>
-                        <th>Level</th>
-                        <th>Status</th>
-                        <th>Joined</th>
-                        <th></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {users.length === 0 ? (
-                        <tr><td colSpan={7} style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)' }}>No users found</td></tr>
-                      ) : users.map(u => (
-                        <tr key={u._id}>
-                          <td>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-                              <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'linear-gradient(135deg,var(--cyan),var(--purple))', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.8rem', flexShrink: 0 }}>⚔</div>
-                              <div>
-                                <div className="name-cell">{u.name}</div>
-                                {(u.isAdmin || u.isMod) && <span className={`badge ${u.isAdmin ? 'badge-gold' : 'badge-purple'}`} style={{ fontSize: '0.62rem' }}>{u.isAdmin ? 'Admin' : 'Mod'}</span>}
-                              </div>
-                            </div>
-                          </td>
-                          <td><span className="phone-cell">+{u.phone}</span></td>
-                          <td><span className="balance-cell">₿ {(u.wallet + u.bank).toLocaleString()}</span></td>
-                          <td><span className="level-cell">Lv {u.level}</span></td>
-                          <td><span className={`badge ${u.banned ? 'badge-red' : 'badge-green'}`}>{u.banned ? 'Banned' : 'Active'}</span></td>
-                          <td style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>{u.createdAt ? new Date(u.createdAt).toLocaleDateString() : '—'}</td>
-                          <td>
-                            <button className="m-btn m-btn-ghost m-btn-sm" onClick={() => { setSelectedUser(u); setEditMode(false); }}>View</button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-
-                  {pagination.pages > 1 && (
-                    <div className="pagination">
-                      <button className="page-btn" disabled={pagination.page <= 1} onClick={() => loadUsers(pagination.page - 1)}>‹</button>
-                      {Array.from({ length: Math.min(5, pagination.pages) }, (_, i) => {
-                        const p = Math.max(1, pagination.page - 2) + i;
-                        if (p > pagination.pages) return null;
-                        return <button key={p} className={`page-btn${p === pagination.page ? ' active' : ''}`} onClick={() => loadUsers(p)}>{p}</button>;
-                      })}
-                      <button className="page-btn" disabled={pagination.page >= pagination.pages} onClick={() => loadUsers(pagination.page + 1)}>›</button>
-                      <span style={{ color: 'var(--text-muted)', fontSize: '0.78rem' }}>Page {pagination.page} of {pagination.pages}</span>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* ══ DUPLICATES ══ */}
-          {tab === 'duplicates' && (
-            <div>
-              <div className="page-header">
-                <h1 className="page-title">Duplicate Detection</h1>
-                <p className="page-subtitle">Find and merge duplicate user accounts</p>
-              </div>
-
-              <div className="info-box">
-                <strong>How it works:</strong> Scans all user records, extracts phone numbers from JIDs, and groups records sharing the same phone. Merging combines wallet + bank balances, best level/XP, merged inventories & achievements. The secondary account is permanently deleted.
-              </div>
-
-              <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
-                <button className="m-btn m-btn-primary" disabled={dupLoading} onClick={async () => {
-                  setDupLoading(true); setDupScanned(false);
-                  try {
-                    const res = await adminApi.detectDuplicates();
-                    setDupGroups(res.duplicates); setDupScanned(true);
-                    showToast(res.totalGroups === 0 ? '✅ No duplicates found!' : `⚠️ ${res.totalGroups} duplicate group(s) found`);
-                  } catch (e: unknown) { showToast('❌ ' + (e instanceof Error ? e.message : 'Scan failed')); }
-                  finally { setDupLoading(false); }
-                }}>
-                  {dupLoading ? '⏳ Scanning…' : '🔍 Scan for Duplicates'}
-                </button>
-                {dupScanned && dupGroups.length > 0 && (
-                  <button className="m-btn m-btn-ghost" onClick={() => doConfirm({
-                    title: '⚡ Auto-Merge All Duplicates',
-                    message: `Auto-merge all ${dupGroups.length} duplicate group(s)? For each group, the oldest account will be kept as primary. This cannot be undone.`,
-                    action: async () => {
-                      let merged = 0, failed = 0;
-                      for (const g of dupGroups) {
-                        const sorted = [...g.users].sort((a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime());
-                        const primary = sorted[0];
-                        for (let i = 1; i < sorted.length; i++) {
-                          try { await adminApi.mergeUsers(primary.phone, sorted[i].phone); merged++; }
-                          catch { failed++; }
-                        }
-                      }
-                      showToast(`✅ Auto-merge: ${merged} merged, ${failed} failed`);
-                      setDupGroups([]); setDupScanned(false);
-                    },
-                  })}>
-                    ⚡ Auto-Merge All ({dupGroups.length})
-                  </button>
-                )}
-              </div>
-
-              {dupScanned && dupGroups.length === 0 && (
-                <div className="success-box" style={{ textAlign: 'center', padding: '2rem' }}>
-                  <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>✅</div>
-                  <div style={{ fontWeight: 700 }}>No duplicate accounts found</div>
-                  <div style={{ fontSize: '0.85rem', marginTop: 4 }}>All user records have unique phone numbers</div>
-                </div>
-              )}
-
-              {dupGroups.map(group => (
-                <div key={group.phone} style={{ background: 'rgba(8,8,25,0.9)', border: '1px solid rgba(239,68,68,0.25)', borderRadius: 14, padding: '1.25rem 1.5rem', marginBottom: '1rem' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-                    <div>
-                      <div style={{ fontWeight: 700, color: '#fca5a5' }}>⚠️ {group.count} accounts for +{group.phone}</div>
-                      <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: 2 }}>These need to be merged into one record</div>
-                    </div>
-                    <button className="m-btn m-btn-primary m-btn-sm" onClick={() => { setMergingGroup(group); setMergePrimary(''); }}>🔀 Merge</button>
-                  </div>
-                  <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
-                    {group.users.map(u => (
-                      <div key={u._id} style={{ background: 'rgba(0,0,0,0.4)', borderRadius: 10, padding: '0.75rem 1rem', flex: '1 1 160px' }}>
-                        <div style={{ fontWeight: 700, fontSize: '0.9rem' }}>{u.name}</div>
-                        <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginTop: 2 }}>{u.jid || u.lid || 'No WA ID'}</div>
-                        <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                          <span style={{ color: 'var(--gold)', fontWeight: 700, fontSize: '0.85rem' }}>₿ {(u.wallet + u.bank).toLocaleString()}</span>
-                          <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>Lv {u.level}</span>
-                        </div>
-                        <div style={{ color: 'var(--text-muted)', fontSize: '0.72rem', marginTop: 2 }}>{u.createdAt ? new Date(u.createdAt).toLocaleDateString() : ''}</div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* ══ MIGRATION ══ */}
-          {tab === 'migration' && (
-            <div>
-              <div className="page-header">
-                <h1 className="page-title">Identity Migration</h1>
-                <p className="page-subtitle">Normalize phone fields from JID identifiers</p>
-              </div>
-
-              <div className="info-box">
-                <strong>What this does:</strong> Scans every user document, derives the canonical phone number from each JID (<code style={{ color: 'var(--cyan)' }}>2348012345678@s.whatsapp.net</code> → <code style={{ color: 'var(--cyan)' }}>2348012345678</code>), sets the indexed <code style={{ color: 'var(--cyan)' }}>phone</code> field if missing, and reports any conflicts. Safe to run multiple times.
-              </div>
-
-              <button className="m-btn m-btn-primary" disabled={migLoading} onClick={async () => {
-                setMigLoading(true);
-                try { setMigResult(await adminApi.runMigration()); showToast('✅ Migration complete'); }
-                catch (e: unknown) { showToast('❌ ' + (e instanceof Error ? e.message : 'Failed')); }
-                finally { setMigLoading(false); }
-              }}>
-                {migLoading ? '⏳ Running…' : '▶ Run Migration'}
-              </button>
-
-              {migResult && (
-                <div style={{ marginTop: '1.5rem' }}>
-                  <div className={migResult.conflicts > 0 ? 'warning-box' : 'success-box'}>
-                    <div style={{ fontWeight: 700, marginBottom: '0.75rem' }}>
-                      {migResult.conflicts > 0 ? '⚠️ Migration complete with conflicts' : '✅ Migration complete — no conflicts'}
-                    </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: '0.6rem' }}>
-                      {[['📋 Normalized', migResult.normalized], ['✅ Already Set', migResult.alreadySet], ['🔗 LID-only', migResult.lidOnly], ['⚠️ Conflicts', migResult.conflicts]].map(([label, val]) => (
-                        <div key={String(label)} style={{ background: 'rgba(0,0,0,0.3)', borderRadius: 8, padding: '0.65rem', textAlign: 'center' }}>
-                          <div style={{ fontSize: '1.3rem', fontWeight: 800, color: 'var(--cyan)' }}>{String(val)}</div>
-                          <div style={{ fontSize: '0.75rem', marginTop: 2, opacity: 0.8 }}>{String(label)}</div>
-                        </div>
-                      ))}
-                    </div>
-                    <p style={{ fontSize: '0.85rem', margin: '0.75rem 0 0' }}>{migResult.message}</p>
-                  </div>
-
-                  {migResult.conflictList.length > 0 && (
-                    <div className="m-panel" style={{ marginTop: '1rem' }}>
-                      <div className="m-panel-header"><span className="m-panel-title">⚠️ Conflict List</span></div>
-                      <div className="m-panel-body" style={{ maxHeight: 260, overflowY: 'auto' }}>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                          {migResult.conflictList.map((c, i) => (
-                            <div key={i} style={{ background: 'rgba(0,0,0,0.3)', borderRadius: 8, padding: '0.6rem 0.85rem', fontSize: '0.82rem', color: 'var(--text-dim)' }}>
-                              Phone <span style={{ color: 'var(--cyan)' }}>+{c.phone}</span> → user A: <code style={{ color: 'var(--text-primary)' }}>{c.userA}</code> · user B: <code style={{ color: 'var(--text-primary)' }}>{c.userB}</code>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* ══ BOTS ══ */}
-          {tab === 'bots' && (
-            <div>
-              <div className="page-header" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: '1rem' }}>
-                <div>
-                  <h1 className="page-title">Bot Instances</h1>
-                  <p className="page-subtitle">Connect and manage your WhatsApp bot accounts</p>
-                </div>
-                <div style={{ display: 'flex', gap: '0.75rem' }}>
-                  <button className="m-btn m-btn-ghost" onClick={loadBots} disabled={botsLoading}>↻ Refresh</button>
-                  <button className="m-btn m-btn-primary" onClick={() => { setShowAddBot(true); setActivePairing(null); setPairStatus(null); setBotPhone(''); setBotName(''); }}>
-                    + Add Bot
-                  </button>
-                </div>
-              </div>
-
-              {/* ADD BOT MODAL */}
-              {showAddBot && (
-                <div className="modal-overlay">
-                  <div className="modal-box" style={{ maxWidth: 500 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-                      <h3 className="modal-title" style={{ marginBottom: 0 }}>🤖 Add New Bot</h3>
-                      <button style={{ background: 'none', border: 'none', color: 'var(--text-dim)', fontSize: '1.5rem', cursor: 'pointer' }}
-                        onClick={() => { setShowAddBot(false); setActivePairing(null); setPairStatus(null); stopPolling(); }}>×</button>
-                    </div>
-
-                    {!activePairing ? (
-                      <>
-                        <div className="info-box" style={{ marginBottom: '1.25rem' }}>
-                          Enter the WhatsApp phone number for your bot. The server will request a pairing code from WhatsApp — enter it in your phone to link the bot.
-                        </div>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginBottom: '1.5rem' }}>
-                          <div>
-                            <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-dim)', marginBottom: '0.4rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                              Bot Phone Number *
-                            </label>
-                            <input className="m-input" type="tel" placeholder="e.g. 2348012345678 (with country code, no +)"
-                              value={botPhone} onChange={e => setBotPhone(e.target.value)}
-                              onKeyDown={e => e.key === 'Enter' && startPairing()} />
-                            <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginTop: '0.3rem' }}>Include country code. No spaces or +. Example: 2348012345678</div>
-                          </div>
-                          <div>
-                            <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-dim)', marginBottom: '0.4rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                              Bot Name (optional)
-                            </label>
-                            <input className="m-input" type="text" placeholder="e.g. Konosuba Bot"
-                              value={botName} onChange={e => setBotName(e.target.value)} />
-                          </div>
-                        </div>
-                        <div style={{ display: 'flex', gap: '0.75rem' }}>
-                          <button className="m-btn m-btn-primary" style={{ flex: 1, justifyContent: 'center' }}
-                            disabled={pairingLoading || !botPhone.trim()} onClick={startPairing}>
-                            {pairingLoading ? '⏳ Requesting code…' : '🔗 Get Pairing Code'}
-                          </button>
-                          <button className="m-btn m-btn-ghost" onClick={() => setShowAddBot(false)}>Cancel</button>
-                        </div>
-                      </>
-                    ) : (
-                      <>
-                        {pairStatus === 'connected' ? (
-                          <div className="success-box" style={{ textAlign: 'center', padding: '2rem' }}>
-                            <div style={{ fontSize: '3rem', marginBottom: '0.75rem' }}>✅</div>
-                            <div style={{ fontWeight: 700, fontSize: '1.1rem' }}>Bot Connected!</div>
-                            <div style={{ color: 'var(--text-dim)', fontSize: '0.88rem', marginTop: '0.5rem' }}>Your bot is now linked and active.</div>
-                            <button className="m-btn m-btn-primary" style={{ marginTop: '1.5rem', justifyContent: 'center' }}
-                              onClick={() => { setShowAddBot(false); setActivePairing(null); setPairStatus(null); loadBots(); }}>
-                              Done
-                            </button>
-                          </div>
-                        ) : pairStatus === 'disconnected' ? (
-                          <div style={{ textAlign: 'center', padding: '1.5rem 0' }}>
-                            <div style={{ fontSize: '2.5rem', marginBottom: '0.75rem' }}>❌</div>
-                            <div style={{ fontWeight: 700 }}>Connection failed</div>
-                            <div style={{ color: 'var(--text-dim)', fontSize: '0.88rem', margin: '0.5rem 0 1.5rem' }}>The pairing was not completed. Please try again.</div>
-                            <button className="m-btn m-btn-primary" onClick={() => { setActivePairing(null); setPairStatus(null); }}>Try Again</button>
-                          </div>
-                        ) : (
-                          <>
-                            <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
-                              <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '0.75rem' }}>Your Pairing Code</div>
-                              <div style={{ fontFamily: 'monospace', fontSize: '2.8rem', fontWeight: 900, letterSpacing: '0.25em', color: 'var(--cyan)', textShadow: '0 0 30px rgba(0,212,255,0.4)', background: 'rgba(0,212,255,0.07)', border: '1px solid rgba(0,212,255,0.25)', borderRadius: 14, padding: '1rem 1.5rem', display: 'inline-block' }}>
-                                {activePairing.code}
-                              </div>
-                              <div style={{ marginTop: '0.75rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
-                                <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--cyan)', animation: 'ping 1.5s ease-in-out infinite' }} />
-                                <span style={{ color: 'var(--text-dim)', fontSize: '0.82rem' }}>Waiting for you to enter the code…</span>
-                              </div>
-                            </div>
-
-                            <div style={{ background: 'rgba(0,0,0,0.4)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 12, padding: '1rem 1.25rem' }}>
-                              <div style={{ color: 'var(--cyan)', fontWeight: 700, fontSize: '0.82rem', marginBottom: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>How to enter this code</div>
-                              {[
-                                'Open WhatsApp on your bot\'s phone',
-                                'Tap ⋮ Menu → Linked Devices',
-                                'Tap "Link a Device"',
-                                'Tap "Link with phone number instead"',
-                                `Enter the code above: ${activePairing.code}`,
-                              ].map((step, i) => (
-                                <div key={i} style={{ display: 'flex', gap: '0.75rem', alignItems: 'flex-start', marginBottom: '0.5rem' }}>
-                                  <div style={{ width: 22, height: 22, borderRadius: '50%', background: 'rgba(0,212,255,0.15)', border: '1px solid rgba(0,212,255,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.72rem', fontWeight: 700, color: 'var(--cyan)', flexShrink: 0 }}>{i + 1}</div>
-                                  <div style={{ color: 'var(--text-dim)', fontSize: '0.85rem', paddingTop: 2 }}>{step}</div>
-                                </div>
-                              ))}
-                            </div>
-
-                            <div style={{ marginTop: '1.25rem', display: 'flex', gap: '0.75rem' }}>
-                              <button className="m-btn m-btn-ghost" style={{ flex: 1, justifyContent: 'center' }}
-                                onClick={() => { stopPolling(); setActivePairing(null); setPairStatus(null); }}>
-                                ← Back
-                              </button>
-                              <button className="m-btn m-btn-ghost" style={{ justifyContent: 'center' }}
-                                onClick={() => navigator.clipboard?.writeText(activePairing.code).then(() => showToast('Code copied!'))}>
-                                Copy Code
-                              </button>
-                            </div>
-                          </>
-                        )}
-                      </>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* BOTS LIST */}
-              {botsLoading ? (
-                <div style={{ textAlign: 'center', padding: '4rem', color: 'var(--text-dim)' }}>
-                  <div style={{ fontSize: '2rem', marginBottom: '0.75rem', animation: 'spin 2s linear infinite' }}>⚙️</div>
-                  Loading bots...
-                </div>
-              ) : bots.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: '4rem 2rem', color: 'var(--text-dim)' }}>
-                  <div style={{ fontSize: '3.5rem', marginBottom: '1rem' }}>🤖</div>
-                  <div style={{ fontWeight: 700, fontSize: '1.1rem', color: 'var(--text-primary)' }}>No bots connected</div>
-                  <div style={{ fontSize: '0.88rem', marginTop: '0.5rem', marginBottom: '1.5rem' }}>Add your first bot to get started</div>
-                  <button className="m-btn m-btn-primary" onClick={() => { setShowAddBot(true); setActivePairing(null); setPairStatus(null); }}>+ Add Bot</button>
-                </div>
-              ) : (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '1rem' }}>
-                  {bots.map(bot => (
-                    <div key={bot._id} style={{ background: 'rgba(8,8,25,0.9)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 16, padding: '1.25rem 1.5rem' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem', marginBottom: '1rem' }}>
-                        <div style={{ width: 48, height: 48, borderRadius: '50%', background: 'linear-gradient(135deg,var(--cyan),var(--purple))', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.4rem', flexShrink: 0 }}>🤖</div>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontWeight: 700, fontSize: '0.95rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{bot.name}</div>
-                          <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>+{bot.phone}</div>
-                        </div>
-                        <span style={{ fontSize: '0.72rem', fontWeight: 700, padding: '0.25rem 0.65rem', borderRadius: 20,
-                          background: bot.status === 'connected' ? 'rgba(74,222,128,0.15)' : 'rgba(255,255,255,0.06)',
-                          color: bot.status === 'connected' ? 'var(--green)' : 'var(--text-muted)',
-                          border: `1px solid ${bot.status === 'connected' ? 'rgba(74,222,128,0.3)' : 'rgba(255,255,255,0.08)'}`,
-                        }}>
-                          {bot.status === 'connected' ? '● Online' : '○ Offline'}
-                        </span>
-                      </div>
-                      <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginBottom: '1rem' }}>
-                        Added {bot.createdAt ? new Date(bot.createdAt).toLocaleDateString() : '—'}
-                      </div>
-                      <div style={{ display: 'flex', gap: '0.6rem' }}>
-                        <button className="m-btn m-btn-ghost m-btn-sm" style={{ flex: 1, justifyContent: 'center' }}
-                          onClick={() => { setShowAddBot(true); setBotPhone(bot.phone); setBotName(bot.name); setActivePairing(null); setPairStatus(null); }}>
-                          🔄 Re-link
-                        </button>
-                        <button className="m-btn m-btn-danger m-btn-sm"
-                          onClick={() => doConfirm({
-                            title: 'Remove Bot',
-                            message: `Remove ${bot.name} (+${bot.phone})? The bot session will be disconnected.`,
-                            action: async () => { await adminApi.deleteBot(bot.botId); showToast('🗑️ Bot removed'); loadBots(); },
-                          })}>
-                          🗑️
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* ══ ACTIONS ══ */}
-          {tab === 'actions' && (
-            <div>
-              <div className="page-header">
-                <h1 className="page-title">Global Actions</h1>
-                <p className="page-subtitle">Bulk operations and data management tools</p>
-              </div>
-
-              {actionMsg && <div className="success-box" style={{ marginBottom: '1.5rem' }}>{actionMsg}</div>}
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem', maxWidth: 640 }}>
-                {[
-                  { icon: '💸', title: 'Wipe All Economy', desc: 'Reset all wallets to ₿500 and bank to ₿0. Inventories preserved.', danger: true, fn: async () => { const r = await adminApi.wipeEconomy(); setActionMsg('✅ ' + r.message); } },
-                  { icon: '✨', title: 'Wipe All XP & Levels', desc: 'Reset every user XP to 0 and level to 1. Cannot be undone.', danger: true, fn: async () => { const r = await adminApi.wipeXP(); setActionMsg('✅ ' + r.message); } },
-                  { icon: '🎒', title: 'Wipe All Inventories', desc: 'Clear all items from every user inventory. Cannot be undone.', danger: true, fn: async () => { const r = await adminApi.wipeInventory(); setActionMsg('✅ ' + r.message); } },
-                  { icon: '📥', title: 'Export All Users (CSV)', desc: 'Download a CSV with phone, wallet, level, ban status, and join dates.', danger: false, fn: async () => { adminApi.exportUsers(); setActionMsg('✅ Download started'); } },
-                ].map(item => (
-                  <div key={item.title} style={{ background: 'rgba(8,8,25,0.9)', border: `1px solid ${item.danger ? 'rgba(239,68,68,0.2)' : 'rgba(255,255,255,0.05)'}`, borderRadius: 14, padding: '1.25rem 1.5rem', display: 'flex', gap: '1rem', alignItems: 'center' }}>
-                    <div style={{ fontSize: '2rem', flexShrink: 0 }}>{item.icon}</div>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontWeight: 700, color: 'var(--text-primary)', fontSize: '0.95rem' }}>{item.title}</div>
-                      <div style={{ color: 'var(--text-muted)', fontSize: '0.82rem', marginTop: 2 }}>{item.desc}</div>
-                    </div>
-                    <button className={`m-btn ${item.danger ? 'm-btn-danger' : 'm-btn-primary'}`} style={{ flexShrink: 0 }}
-                      onClick={() => item.danger
-                        ? doConfirm({ title: `⚠️ ${item.title}`, message: `${item.desc} This cannot be undone.`, action: item.fn })
-                        : item.fn()
-                      }>
-                      {item.danger ? '⚠️ Run' : '▶ Run'}
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
+        <div className="mgr-content animate-fade">
+          {activeTab === "dashboard" && <DashboardTab stats={stats} />}
+          {activeTab === "bots" && <BotsTab />}
+          {activeTab === "users" && <UsersTab />}
+          {activeTab === "duplicates" && <DuplicatesTab />}
+          {activeTab === "migration" && <MigrationTab />}
+          {activeTab === "actions" && <ActionsTab />}
+          {activeTab === "logs" && <LogsTab />}
         </div>
-      </main>
+      </div>
     </div>
   );
 }

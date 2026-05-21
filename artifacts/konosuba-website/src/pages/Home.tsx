@@ -1,652 +1,429 @@
-import { Link } from 'wouter';
-import { useEffect, useState, useRef } from 'react';
-import { api } from '../lib/api';
-
-interface Stats {
-  totalUsers?: number;
-  activeUsers?: number;
-  totalCoinsInCirculation?: number;
-  activeBots?: number;
-}
-
-// ── Real KonoSuba anime character images
-const IMGS = {
-  kazuma:   'https://static.wikia.nocookie.net/konosuba/images/4/4f/Kazuma_Anime.png/revision/latest?width=420',
-  aqua:     'https://static.wikia.nocookie.net/konosuba/images/9/9e/Aqua_Anime.png/revision/latest?width=420',
-  megumin:  'https://static.wikia.nocookie.net/konosuba/images/9/97/Megumin_Anime.png/revision/latest?width=420',
-  darkness: 'https://static.wikia.nocookie.net/konosuba/images/d/d5/Darkness_Anime.png/revision/latest?width=420',
-  wiz:      'https://static.wikia.nocookie.net/konosuba/images/e/eb/Wiz_Anime.png/revision/latest?width=300',
-  yunyun:   'https://static.wikia.nocookie.net/konosuba/images/5/57/Yunyun_Anime.png/revision/latest?width=300',
-};
-
-const PARTY = [
-  {
-    img: IMGS.kazuma,
-    name: 'Kazuma Satou',
-    role: 'Adventurer · Leader',
-    color: '#00d4ff',
-    desc: 'The cunning strategist who masters luck and steals skills from any enemy. Born to lead parties to victory.',
-  },
-  {
-    img: IMGS.aqua,
-    name: 'Aqua',
-    role: 'Goddess · Arch-Priest',
-    color: '#38bdf8',
-    desc: 'A water goddess with divine healing powers. Her questionable judgment keeps things interesting.',
-  },
-  {
-    img: IMGS.megumin,
-    name: 'Megumin',
-    role: 'Arch-Wizard · Explosion',
-    color: '#f472b6',
-    desc: 'Casts only one-shot explosion magic. Every. Single. Day. No exceptions whatsoever.',
-  },
-  {
-    img: IMGS.darkness,
-    name: 'Darkness',
-    role: 'Crusader · Tank',
-    color: '#ffd700',
-    desc: 'An unbreakable defender with a deeply complicated and unique relationship with pain.',
-  },
-];
+import { useState, useEffect } from "react";
+import { Link } from "wouter";
 
 const FEATURES = [
-  { icon: '🤖', title: 'AI Chat', desc: 'Advanced AI-powered conversations with context memory and multi-language support.' },
-  { icon: '🛡️', title: 'Moderation', desc: 'Auto-ban, spam protection, word filters, and smart link detection.' },
-  { icon: '🔗', title: 'Anti-Link', desc: 'Intelligent link filtering with whitelist support and custom rules.' },
-  { icon: '💰', title: 'Economy', desc: 'Full RPG economy system with wallet, bank, items, and trading.' },
-  { icon: '⚡', title: 'Auto Responses', desc: 'Trigger-based auto-reply system with rich message formatting.' },
-  { icon: '🎵', title: 'Music', desc: 'Stream audio from YouTube, Spotify links, and custom sources.' },
-  { icon: '📊', title: 'Analytics', desc: 'Real-time group stats, message counts, and activity graphs.' },
-  { icon: '📜', title: 'Logging', desc: 'Full audit trail for group events, joins, leaves, and admin actions.' },
-  { icon: '👋', title: 'Welcome Messages', desc: 'Customizable welcome and goodbye messages with member cards.' },
-  { icon: '💾', title: 'Backup System', desc: 'Automated group data backup and restore with cloud storage.' },
-  { icon: '👥', title: 'Group Management', desc: 'Promote, demote, kick, mute members with bulk action support.' },
-  { icon: '💎', title: 'Premium Features', desc: 'Exclusive commands, priority processing, and advanced tools.' },
+  { icon: "⚔️", cls: "feature-icon-cyan", title: "Auto Moderation", desc: "Kazuma-grade smart moderation. Kick spammers, warn troublemakers, and keep your group legendary." },
+  { icon: "💧", cls: "feature-icon-cyan", title: "Welcome & Farewell", desc: "Aqua-blessed greetings for every member. Custom welcome cards and goodbye messages." },
+  { icon: "💥", cls: "feature-icon-red", title: "Explosion Commands", desc: "Over 200+ commands — games, anime quotes, polls, trivia and Megumin's signature EXPLOSION skill." },
+  { icon: "🛡️", cls: "feature-icon-gold", title: "Anti-Link & Anti-Spam", desc: "Darkness-tier protection. Block malicious links, fight spam floods, and keep the party safe." },
+  { icon: "📊", cls: "feature-icon-purple", title: "Analytics Dashboard", desc: "Real-time stats on messages, members, activity peaks, and bot performance at your fingertips." },
+  { icon: "🎭", cls: "feature-icon-cyan", title: "Fun & Entertainment", desc: "Memes, anime GIFs, RPG battles, ship percentages, and much more to keep your group alive." },
+  { icon: "🔔", cls: "feature-icon-gold", title: "Reminders & Scheduler", desc: "Set reminders, schedule announcements, and automate recurring messages on any timetable." },
+  { icon: "🌐", cls: "feature-icon-purple", title: "Multi-Language", desc: "Supports 12+ languages. Your community speaks any tongue, the bot speaks all of them." },
+  { icon: "⚡", cls: "feature-icon-red", title: "Instant Response", desc: "Sub-100ms response time. The bot reacts faster than Darkness dodges an attack." },
 ];
 
-const COMMANDS = [
-  { name: '.ai', desc: 'Chat with AI assistant', cat: 'AI' },
-  { name: '.imagine', desc: 'Generate AI artwork', cat: 'AI' },
-  { name: '.ban', desc: 'Ban a group member', cat: 'Moderation' },
-  { name: '.warn', desc: 'Issue a warning to user', cat: 'Moderation' },
-  { name: '.mute', desc: 'Mute a member temporarily', cat: 'Moderation' },
-  { name: '.balance', desc: 'Check your coin balance', cat: 'Economy' },
-  { name: '.daily', desc: 'Claim daily reward coins', cat: 'Economy' },
-  { name: '.transfer', desc: 'Transfer coins to a user', cat: 'Economy' },
-  { name: '.play', desc: 'Play audio in group', cat: 'Music' },
-  { name: '.lyrics', desc: 'Get song lyrics', cat: 'Music' },
-  { name: '.welcome', desc: 'Set welcome message', cat: 'Admin' },
-  { name: '.backup', desc: 'Backup group data', cat: 'Admin' },
-  { name: '.stats', desc: 'View group statistics', cat: 'Admin' },
-  { name: '.antilnk', desc: 'Toggle anti-link mode', cat: 'Admin' },
-  { name: '.sticker', desc: 'Convert image to sticker', cat: 'Media' },
-  { name: '.toimg', desc: 'Convert sticker to image', cat: 'Media' },
+const COMMAND_TABS = [
+  { id: "general", label: "General", icon: "⚔️" },
+  { id: "moderation", label: "Moderation", icon: "🛡️" },
+  { id: "fun", label: "Fun", icon: "🎭" },
+  { id: "admin", label: "Admin", icon: "👑" },
+];
+
+const COMMANDS: Record<string, { name: string; desc: string }[]> = {
+  general: [
+    { name: "!help", desc: "Show all available commands and usage guide" },
+    { name: "!info", desc: "Display bot info, uptime and version" },
+    { name: "!ping", desc: "Check bot response time and latency" },
+    { name: "!tagall", desc: "Mention all group members at once" },
+    { name: "!quote", desc: "Get a random KonoSuba quote" },
+    { name: "!weather [city]", desc: "Check weather for any city in the world" },
+    { name: "!remind [time] [msg]", desc: "Set a personal or group reminder" },
+  ],
+  moderation: [
+    { name: "!kick @user", desc: "Remove a member from the group (admin only)" },
+    { name: "!warn @user", desc: "Issue a warning. 3 warnings = auto-kick" },
+    { name: "!mute @user [time]", desc: "Temporarily mute a member" },
+    { name: "!antilink on/off", desc: "Toggle link blocking in the group" },
+    { name: "!antispam on/off", desc: "Enable spam flood protection" },
+    { name: "!promote @user", desc: "Promote member to group admin" },
+    { name: "!rules", desc: "Display group rules to all members" },
+  ],
+  fun: [
+    { name: "!explosion", desc: "Cast Megumin's signature EXPLOSION (with sound)" },
+    { name: "!ship @user1 @user2", desc: "Check love compatibility percentage" },
+    { name: "!battle @user", desc: "Start an RPG battle with another member" },
+    { name: "!meme", desc: "Get a random anime or KonoSuba meme" },
+    { name: "!trivia", desc: "Start a KonoSuba trivia quiz game" },
+    { name: "!waifu", desc: "Get your daily waifu card assignment" },
+    { name: "!sticker [text]", desc: "Convert image to sticker with text" },
+  ],
+  admin: [
+    { name: "!setprefix [char]", desc: "Change bot command prefix for this group" },
+    { name: "!setwelcome [msg]", desc: "Customize the welcome message template" },
+    { name: "!setlang [code]", desc: "Change bot language (en, id, es, pt, ...)" },
+    { name: "!broadcast [msg]", desc: "Send message to all groups (owner only)" },
+    { name: "!groupinfo", desc: "Show detailed group statistics" },
+    { name: "!reset", desc: "Reset all group bot settings to defaults" },
+    { name: "!maintenance on/off", desc: "Toggle maintenance mode for the bot" },
+  ],
+};
+
+const PLANS = [
+  {
+    name: "Free",
+    price: "0",
+    period: "/forever",
+    featured: false,
+    features: [
+      { text: "1 WhatsApp bot", ok: true },
+      { text: "50 commands", ok: true },
+      { text: "Basic moderation", ok: true },
+      { text: "5 groups max", ok: true },
+      { text: "Community support", ok: true },
+      { text: "Analytics dashboard", ok: false },
+      { text: "Priority support", ok: false },
+    ],
+    cta: "Get Started",
+    ctaCls: "btn-outline",
+  },
+  {
+    name: "Basic",
+    price: "9",
+    period: "/month",
+    featured: false,
+    features: [
+      { text: "3 WhatsApp bots", ok: true },
+      { text: "All 200+ commands", ok: true },
+      { text: "Full moderation suite", ok: true },
+      { text: "30 groups max", ok: true },
+      { text: "Analytics dashboard", ok: true },
+      { text: "Email support", ok: true },
+      { text: "Custom welcome cards", ok: false },
+    ],
+    cta: "Start Trial",
+    ctaCls: "btn-outline",
+  },
+  {
+    name: "Pro",
+    price: "24",
+    period: "/month",
+    featured: true,
+    badge: "Most Popular",
+    features: [
+      { text: "10 WhatsApp bots", ok: true },
+      { text: "All 200+ commands", ok: true },
+      { text: "Full moderation suite", ok: true },
+      { text: "Unlimited groups", ok: true },
+      { text: "Advanced analytics", ok: true },
+      { text: "Priority 24/7 support", ok: true },
+      { text: "Custom welcome cards", ok: true },
+    ],
+    cta: "Get Pro",
+    ctaCls: "btn-cyan",
+  },
+  {
+    name: "Enterprise",
+    price: "79",
+    period: "/month",
+    featured: false,
+    features: [
+      { text: "Unlimited bots", ok: true },
+      { text: "Custom commands", ok: true },
+      { text: "White-label option", ok: true },
+      { text: "Unlimited groups", ok: true },
+      { text: "Dedicated infrastructure", ok: true },
+      { text: "SLA guarantee", ok: true },
+      { text: "Dedicated manager", ok: true },
+    ],
+    cta: "Contact Sales",
+    ctaCls: "btn-ghost",
+  },
 ];
 
 const TESTIMONIALS = [
-  { img: IMGS.kazuma, name: 'Kazuma S.', role: 'Group Admin · 4,200 members', text: 'This bot completely transformed our community. The RPG economy keeps everyone engaged and the moderation tools are leagues ahead.', stars: 5 },
-  { img: IMGS.aqua, name: 'Aqua D.', role: 'Server Owner · 12k users', text: 'The anime aesthetic is absolutely stunning. My members love the visual style and the AI chat feature has been a game changer.', stars: 5 },
-  { img: IMGS.darkness, name: 'Darkness C.', role: 'Raid Leader · Premium', text: 'Premium plan is 100% worth it. The advanced analytics and priority processing make managing our large community effortless.', stars: 5 },
-  { img: IMGS.megumin, name: 'Megumin A.', role: 'Bot Developer', text: 'As a developer I appreciate the clean architecture and extensive admin tools. The webhook integration is seamless.', stars: 5 },
-  { img: IMGS.wiz, name: 'Wiz V.', role: 'Content Creator', text: 'Setup took literally 5 minutes. The documentation is clear and the support team responds faster than any other service.', stars: 5 },
-  { img: IMGS.yunyun, name: 'Yunyun Y.', role: 'Community Manager', text: 'The economy system alone is worth the subscription. Members are completing quests and trading items like never before.', stars: 5 },
+  { text: "This bot transformed our WhatsApp group completely. Moderation is effortless and the KonoSuba theme keeps everyone entertained!", author: "ArindaS", role: "Group Admin • 2,400 members", initials: "AS" },
+  { text: "Finally a WhatsApp bot that's actually fun to use. The explosion command alone is worth every penny. Megumin would be proud!", author: "RezaK", role: "Community Manager", initials: "RK" },
+  { text: "We run 15 active groups and this bot manages all of them seamlessly. Analytics are incredibly useful for tracking engagement.", author: "Priya M", role: "Enterprise Customer", initials: "PM" },
+  { text: "Setup took less than 5 minutes. Response is lightning fast and the commands are intuitive. Best WhatsApp bot platform out there.", author: "TomH", role: "Discord & WhatsApp Admin", initials: "TH" },
+  { text: "The anti-spam and anti-link features alone saved our group from chaos. It's like having Darkness guard your server 24/7.", author: "LucasB", role: "Gaming Community Lead", initials: "LB" },
+  { text: "Customer support is amazing. They helped us set up custom welcome cards in under an hour. Highly recommended!", author: "SarahK", role: "Pro User", initials: "SK" },
 ];
-
-const PRICING = [
-  { tier: 'Adventurer', price: 'Free', period: 'forever', features: ['50 commands/day', 'Basic moderation', 'Economy system', 'Welcome messages', '3 groups max', 'Community support'], featured: false },
-  { tier: 'Knight', price: '$9', period: '/month', features: ['Unlimited commands', 'AI Chat (100 msgs/day)', 'Advanced moderation', 'Music streaming', 'Analytics dashboard', '15 groups', 'Priority support'], featured: true },
-  { tier: 'Legend', price: '$24', period: '/month', features: ['Everything in Knight', 'Unlimited AI messages', 'Custom branding', 'Backup system', 'Premium analytics', 'Unlimited groups', '24/7 dedicated support', 'Early access features'], featured: false },
-];
-
-function Counter({ target, suffix = '' }: { target: number; suffix?: string }) {
-  const [count, setCount] = useState(0);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (!entry.isIntersecting) return;
-        observer.disconnect();
-        let start = 0;
-        const step = target / 60;
-        const timer = setInterval(() => {
-          start = Math.min(start + step, target);
-          setCount(Math.floor(start));
-          if (start >= target) clearInterval(timer);
-        }, 16);
-      },
-      { threshold: 0.3 }
-    );
-    if (ref.current) observer.observe(ref.current);
-    return () => observer.disconnect();
-  }, [target]);
-
-  return (
-    <div ref={ref} className="stat-number">
-      {count.toLocaleString()}
-      {suffix}
-    </div>
-  );
-}
 
 export default function Home() {
-  const [stats, setStats] = useState<Stats>({});
-  const [cmdSearch, setCmdSearch] = useState('');
-  const [cmdCat, setCmdCat] = useState('All');
-  const cats = ['All', 'AI', 'Economy', 'Moderation', 'Music', 'Admin', 'Media'];
-  const filtered = COMMANDS.filter(
-    (c) =>
-      (cmdCat === 'All' || c.cat === cmdCat) &&
-      (cmdSearch === '' || c.name.includes(cmdSearch) || c.desc.toLowerCase().includes(cmdSearch.toLowerCase()))
-  );
+  const [activeTab, setActiveTab] = useState("general");
+  const [stats, setStats] = useState({ users: 12800, bots: 3240, messages: 14200000, groups: 48600 });
 
-  useEffect(() => {
-    api.stats().then((s) => setStats(s as Stats)).catch(() => {});
-
-    // Custom cursor glow
-    const cursor = document.createElement('div');
-    cursor.className = 'cursor-glow';
-    document.body.appendChild(cursor);
-    const move = (e: MouseEvent) => {
-      cursor.style.left = e.clientX + 'px';
-      cursor.style.top = e.clientY + 'px';
-    };
-    document.addEventListener('mousemove', move);
-
-    // Particle canvas with enhanced animation
-    const canvas = document.createElement('canvas');
-    canvas.className = 'particles-canvas';
-    document.body.appendChild(canvas);
-    const ctx = canvas.getContext('2d')!;
-    let raf: number;
-
-    const resize = () => {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
-    };
-    resize();
-    window.addEventListener('resize', resize);
-
-    const particles = Array.from({ length: 80 }, () => ({
-      x: Math.random() * window.innerWidth,
-      y: Math.random() * window.innerHeight,
-      r: Math.random() * 1.8 + 0.5,
-      vx: (Math.random() - 0.5) * 0.4,
-      vy: (Math.random() - 0.5) * 0.4,
-      opacity: Math.random() * 0.6 + 0.1,
-      color: Math.random() > 0.5 ? '#00d4ff' : Math.random() > 0.5 ? '#ffd700' : '#8b5cf6',
-    }));
-
-    function drawParticles() {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.globalAlpha = 0.8;
-      particles.forEach((p) => {
-        p.x += p.vx;
-        p.y += p.vy;
-        if (p.x < 0) p.x = canvas.width;
-        if (p.x > canvas.width) p.x = 0;
-        if (p.y < 0) p.y = canvas.height;
-        if (p.y > canvas.height) p.y = 0;
-        ctx.fillStyle = p.color;
-        ctx.shadowColor = p.color;
-        ctx.shadowBlur = 8;
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-        ctx.fill();
-      });
-      raf = requestAnimationFrame(drawParticles);
-    }
-    drawParticles();
-
-    return () => {
-      document.removeEventListener('mousemove', move);
-      cursor.remove();
-      canvas.remove();
-      cancelAnimationFrame(raf);
-    };
-  }, []);
+  const fmtNum = (n: number) => n >= 1000000 ? `${(n / 1000000).toFixed(1)}M+` : n >= 1000 ? `${Math.floor(n / 1000)}K+` : `${n}+`;
 
   return (
-    <div style={{ position: 'relative', zIndex: 1 }}>
-      {/* ── NAVBAR ───────────────────────────────────────────────────────── */}
+    <div>
+      {/* NAVBAR */}
       <nav className="navbar">
-        <a href="/" className="navbar-logo">
-          ⚔ KONOSUBA
-        </a>
+        <div className="navbar-logo">
+          <div className="navbar-logo-icon">K</div>
+          KonoBot
+        </div>
         <div className="navbar-links">
-          <a href="#features" className="navbar-link">
-            Features
-          </a>
-          <a href="#party" className="navbar-link">
-            Team
-          </a>
-          <a href="#commands" className="navbar-link">
-            Commands
-          </a>
-          <a href="#pricing" className="navbar-link">
-            Pricing
-          </a>
+          <a href="#features">Features</a>
+          <a href="#party">Party</a>
+          <a href="#commands">Commands</a>
+          <a href="#pricing">Pricing</a>
         </div>
         <div className="navbar-actions">
-          <Link to="/auth?mode=login" className="ghost-btn">
-            Login
-          </Link>
-          <Link to="/auth?mode=register" className="glow-btn">
-            Sign Up
-          </Link>
+          <Link href="/auth"><button className="btn btn-ghost btn-sm">Login</button></Link>
+          <Link href="/auth"><button className="btn btn-cyan btn-sm">Get Started</button></Link>
         </div>
       </nav>
 
-      {/* ── HERO SECTION ─────────────────────────────────────────────────── */}
+      {/* HERO */}
       <section className="hero">
-        <div className="hero-gradient"></div>
-        <div className="section-inner" style={{ width: '100%' }}>
-          <div className="hero-content">
-            <h1 className="hero-title">Control Your WhatsApp Empire</h1>
-            <p className="hero-subtitle">
-              The ultimate anime-inspired WhatsApp bot platform. Automate, moderate, and engage your community with magical power.
-            </p>
-            <div className="hero-cta">
-              <Link to="/auth?mode=register" className="glow-btn">
-                🚀 Get Started Free
-              </Link>
-              <a href="#features" className="ghost-btn">
-                ↓ Explore Features
-              </a>
+        <div className="hero-bg" />
+        <div className="hero-grid" />
+        <div className="hero-content animate-slide-up">
+          <div className="hero-badge">
+            ⚔️ &nbsp;God's Blessing on This Wonderful Bot
+          </div>
+          <h1 className="hero-title">
+            The Most <span className="gradient-text">Legendary</span><br />
+            WhatsApp Bot <span className="gold-text">Platform</span>
+          </h1>
+          <p className="hero-subtitle">
+            Summon the power of Kazuma's party for your WhatsApp groups.
+            Auto-moderation, 200+ commands, analytics, and more — powered by the adventurer spirit.
+          </p>
+          <div className="hero-actions">
+            <Link href="/auth">
+              <button className="btn btn-cyan btn-lg">⚡ Start Free Today</button>
+            </Link>
+            <a href="#commands">
+              <button className="btn btn-outline btn-lg">📜 View Commands</button>
+            </a>
+          </div>
+          <div className="hero-stats">
+            <div className="hero-stat">
+              <span className="hero-stat-value">{fmtNum(stats.users)}</span>
+              <span className="hero-stat-label">Active Users</span>
             </div>
-
-            {/* Live Stats */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '2rem', marginTop: '3rem', maxWidth: '600px', margin: '3rem auto 0' }}>
-              <div>
-                <Counter target={stats.totalUsers ?? 52000} />
-                <div className="stat-label">Total Users</div>
-              </div>
-              <div>
-                <Counter target={stats.activeUsers ?? 8400} />
-                <div className="stat-label">Active Today</div>
-              </div>
-              <div>
-                <Counter target={stats.activeBots ?? 2300} suffix="+" />
-                <div className="stat-label">Bot Groups</div>
-              </div>
+            <div className="hero-stat">
+              <span className="hero-stat-value">{fmtNum(stats.bots)}</span>
+              <span className="hero-stat-label">Bots Deployed</span>
+            </div>
+            <div className="hero-stat">
+              <span className="hero-stat-value">{fmtNum(stats.messages)}</span>
+              <span className="hero-stat-label">Messages Handled</span>
+            </div>
+            <div className="hero-stat">
+              <span className="hero-stat-value">{fmtNum(stats.groups)}</span>
+              <span className="hero-stat-label">Groups Served</span>
             </div>
           </div>
         </div>
       </section>
 
-      {/* ── FEATURES SECTION ─────────────────────────────────────────────── */}
-      <section className="section" id="features">
-        <div className="section-inner">
-          <div style={{ marginBottom: '3rem' }}>
-            <div className="section-badge" style={{ margin: '0 0 1rem' }}>
-              ✨ Core Features
+      {/* FEATURES */}
+      <section id="features" className="section">
+        <div className="section-header">
+          <div className="section-tag">⚔️ Arsenal</div>
+          <h2 className="section-title">Everything Your Party Needs</h2>
+          <p className="section-desc">From Kazuma's cunning moderation to Megumin's explosive fun — your groups will never be the same.</p>
+        </div>
+        <div className="features-grid">
+          {FEATURES.map((f) => (
+            <div key={f.title} className="glass-card feature-card">
+              <div className={`feature-icon ${f.cls}`}>{f.icon}</div>
+              <h3 className="feature-title">{f.title}</h3>
+              <p className="feature-desc">{f.desc}</p>
             </div>
-            <h2 className="section-title">Powerful Tools at Your Fingertips</h2>
-            <p className="section-desc">Everything you need to manage, moderate, and monetize your WhatsApp community.</p>
-          </div>
-          <div className="features-grid">
-            {FEATURES.map((f, i) => (
-              <div key={i} className="glass-card feature-card">
-                <div className="feature-icon">{f.icon}</div>
-                <h3 className="feature-title">{f.title}</h3>
-                <p className="feature-desc">{f.desc}</p>
-              </div>
-            ))}
-          </div>
+          ))}
         </div>
       </section>
 
-      {/* ── PARTY SECTION ────────────────────────────────────────────────── */}
-      <section className="section" id="party">
-        <div className="section-inner">
-          <div style={{ marginBottom: '3rem', textAlign: 'center' }}>
-            <div className="section-badge" style={{ margin: '0 auto 1rem' }}>
-              👥 Meet the Team
-            </div>
-            <h2 className="section-title">Join Our Legendary Party</h2>
-            <p className="section-desc">Together, we create magic. Every member brings unique powers to the adventure.</p>
+      <div className="glow-divider" />
+
+      {/* PARTY / CHARACTERS */}
+      <div className="section-bg-subtle">
+        <section id="party" className="section">
+          <div className="section-header">
+            <div className="section-tag">🎭 The Party</div>
+            <h2 className="section-title">Meet the Adventurers</h2>
+            <p className="section-desc">Each bot personality is inspired by KonoSuba's iconic party members. Choose your style.</p>
           </div>
           <div className="party-grid">
-            {PARTY.map((p, i) => (
-              <div key={i} className="glass-card party-card">
-                <div className="party-avatar">
-                  <img src={p.img} alt={p.name} loading="lazy" />
-                </div>
-                <div className="party-name">{p.name}</div>
-                <div className="party-role">{p.role}</div>
-                <p className="party-desc">{p.desc}</p>
-              </div>
+            <div className="glass-card character-card kazuma">
+              <div className="character-avatar kazuma">K</div>
+              <div className="character-name">Kazuma Mode</div>
+              <div className="character-class kazuma">Adventurer</div>
+              <p className="character-desc">Strategic and cunning. Perfect balance of every feature — moderation, fun, and analytics all in one smooth operator.</p>
+            </div>
+            <div className="glass-card character-card aqua">
+              <div className="character-avatar aqua">A</div>
+              <div className="character-name">Aqua Mode</div>
+              <div className="character-class aqua">Arch Priest</div>
+              <p className="character-desc">Warmth and welcome. Spectacular greeting cards, blessing-level spam protection, and community-focused features.</p>
+            </div>
+            <div className="glass-card character-card megumin">
+              <div className="character-avatar megumin">M</div>
+              <div className="character-name">Megumin Mode</div>
+              <div className="character-class megumin">Arch Wizard</div>
+              <p className="character-desc">Explosive entertainment. Maximum fun commands, anime content, games, and EXPLOSION power at full charge.</p>
+            </div>
+            <div className="glass-card character-card darkness">
+              <div className="character-avatar darkness">D</div>
+              <div className="character-name">Darkness Mode</div>
+              <div className="character-class darkness">Crusader</div>
+              <p className="character-desc">Unbreakable defense. Iron-clad moderation, anti-raid protection, and the most aggressive spam-blocking shield available.</p>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <div className="glow-divider" />
+
+      {/* COMMANDS */}
+      <section id="commands" className="section">
+        <div className="section-header">
+          <div className="section-tag">📜 Grimoire</div>
+          <h2 className="section-title">200+ Powerful Commands</h2>
+          <p className="section-desc">Every spell in the book. Browse by category or search what you need.</p>
+        </div>
+        <div className="commands-wrapper">
+          <div className="commands-sidebar">
+            {COMMAND_TABS.map((t) => (
+              <button key={t.id} className={`cmd-tab${activeTab === t.id ? " active" : ""}`} onClick={() => setActiveTab(t.id)}>
+                {t.icon} {t.label}
+              </button>
             ))}
           </div>
-        </div>
-      </section>
-
-      {/* ── COMMANDS SECTION ─────────────────────────────────────────────── */}
-      <section className="section" id="commands">
-        <div className="section-inner">
-          <div style={{ marginBottom: '2rem' }}>
-            <div className="section-badge" style={{ margin: '0 0 1rem' }}>
-              ⌨️ Commands
-            </div>
-            <h2 className="section-title">Extensive Command Library</h2>
-          </div>
-
-          {/* Search & Filter */}
-          <div style={{ marginBottom: '2rem' }}>
-            <input
-              type="text"
-              placeholder="🔍 Search commands..."
-              value={cmdSearch}
-              onChange={(e) => setCmdSearch(e.target.value)}
-              style={{
-                width: '100%',
-                maxWidth: '400px',
-                padding: '0.75rem 1rem',
-                background: 'rgba(0,212,255,0.08)',
-                border: '1.5px solid rgba(0,212,255,0.2)',
-                borderRadius: '8px',
-                color: 'var(--text-primary)',
-                marginBottom: '1.5rem',
-                fontFamily: 'inherit',
-                fontSize: '0.95rem',
-              }}
-              onFocus={(e) => {
-                e.currentTarget.style.borderColor = 'var(--cyan)';
-                e.currentTarget.style.boxShadow = '0 0 16px var(--cyan-glow)';
-              }}
-              onBlur={(e) => {
-                e.currentTarget.style.borderColor = 'rgba(0,212,255,0.2)';
-                e.currentTarget.style.boxShadow = 'none';
-              }}
-            />
-
-            <div className="commands-filters">
-              {cats.map((cat) => (
-                <button
-                  key={cat}
-                  className={`filter-btn ${cmdCat === cat ? 'active' : ''}`}
-                  onClick={() => setCmdCat(cat)}
-                >
-                  {cat}
-                </button>
+          <div>
+            <div className="commands-list">
+              {(COMMANDS[activeTab] || []).map((cmd) => (
+                <div key={cmd.name} className="command-item">
+                  <span className="command-name">{cmd.name}</span>
+                  <span className="command-desc">{cmd.desc}</span>
+                </div>
               ))}
             </div>
           </div>
-
-          <div className="commands-grid">
-            {filtered.map((cmd, i) => (
-              <div key={i} className="glass-card command-card">
-                <div className="command-name">{cmd.name}</div>
-                <p className="command-desc">{cmd.desc}</p>
-                <span className="command-cat">{cmd.cat}</span>
-              </div>
-            ))}
-          </div>
         </div>
       </section>
 
-      {/* ── TESTIMONIALS SECTION ─────────────────────────────────────────– */}
-      <section className="section" style={{ paddingTop: '5rem' }}>
-        <div className="section-inner">
-          <div style={{ marginBottom: '3rem', textAlign: 'center' }}>
-            <div className="section-badge" style={{ margin: '0 auto 1rem' }}>
-              ⭐ Reviews
-            </div>
-            <h2 className="section-title">Loved by Thousands</h2>
-            <p className="section-desc">See what our community members are saying about KonoSuba.</p>
-          </div>
-          <div className="testimonials-container">
-            {TESTIMONIALS.map((t, i) => (
-              <div key={i} className="glass-card testimonial-card">
-                <div className="testimonial-stars">{'★'.repeat(t.stars)}</div>
-                <p className="testimonial-text">"{t.text}"</p>
-                <div className="testimonial-author">
-                  <div className="testimonial-avatar">
-                    <img src={t.img} alt={t.name} loading="lazy" />
-                  </div>
-                  <div>
-                    <div className="testimonial-name">{t.name}</div>
-                    <div className="testimonial-role">{t.role}</div>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
+      <div className="glow-divider" />
 
-      {/* ── PRICING SECTION ──────────────────────────────────────────────── */}
-      <section className="section" id="pricing">
-        <div className="section-inner">
-          <div style={{ textAlign: 'center', marginBottom: '3rem' }}>
-            <div className="section-badge" style={{ margin: '0 auto 1rem' }}>
-              💎 Pricing
-            </div>
-            <h2 className="section-title">Choose Your Adventure</h2>
-            <p className="section-desc">Start free, upgrade when you're ready for more power.</p>
+      {/* PRICING */}
+      <div className="section-bg-subtle">
+        <section id="pricing" className="section">
+          <div className="section-header">
+            <div className="section-tag">💎 Plans</div>
+            <h2 className="section-title">Choose Your Class</h2>
+            <p className="section-desc">Every adventurer starts somewhere. Upgrade as your party grows.</p>
           </div>
           <div className="pricing-grid">
-            {PRICING.map((p, i) => (
-              <div
-                key={i}
-                className={`glass-card pricing-card${p.featured ? ' featured' : ''}`}
-                style={{ position: 'relative' }}
-              >
-                {p.featured && <div className="pricing-badge">Most Popular</div>}
-                <div className="pricing-tier">{p.tier}</div>
-                <div className="pricing-price">{p.price}</div>
-                <div className="pricing-period">{p.period}</div>
+            {PLANS.map((p) => (
+              <div key={p.name} className={`glass-card pricing-card${p.featured ? " featured" : ""}`}>
+                {p.badge && <div className="pricing-badge">{p.badge}</div>}
+                <div className="pricing-name">{p.name}</div>
+                <div className="pricing-price">
+                  <span className="pricing-currency">$</span>
+                  <span className="pricing-amount">{p.price}</span>
+                </div>
+                <p className="pricing-period">{p.period}</p>
                 <ul className="pricing-features">
-                  {p.features.map((f, j) => (
-                    <li key={j}>{f}</li>
+                  {p.features.map((f) => (
+                    <li key={f.text}>
+                      <span className={f.ok ? "check" : "x"}>{f.ok ? "✓" : "✗"}</span>
+                      {f.text}
+                    </li>
                   ))}
                 </ul>
-                <Link
-                  to="/auth?mode=register"
-                  className={p.featured ? 'glow-btn' : 'ghost-btn'}
-                  style={{ width: '100%', justifyContent: 'center', marginTop: '0.5rem' }}
-                >
-                  {p.price === 'Free' ? 'Get Started' : 'Subscribe Now'}
+                <Link href="/auth">
+                  <button className={`btn ${p.ctaCls} w-full`} style={{ width: "100%" }}>{p.cta}</button>
                 </Link>
               </div>
             ))}
           </div>
+        </section>
+      </div>
+
+      <div className="glow-divider" />
+
+      {/* TESTIMONIALS */}
+      <section className="section">
+        <div className="section-header">
+          <div className="section-tag">⭐ Testimonials</div>
+          <h2 className="section-title">What the Guild Says</h2>
+          <p className="section-desc">Adventurers from across the realm share their experience with KonoBot.</p>
         </div>
-      </section>
-
-      {/* ── CTA SECTION ──────────────────────────────────────────────────── */}
-      <section className="section" style={{ paddingTop: '4rem', paddingBottom: '6rem' }}>
-        <div className="section-inner">
-          <div
-            style={{
-              position: 'relative',
-              background: 'linear-gradient(135deg, rgba(0,212,255,0.06), rgba(139,92,246,0.06))',
-              border: '1px solid rgba(0,212,255,0.15)',
-              borderRadius: 24,
-              overflow: 'hidden',
-              padding: '3.5rem 2rem',
-              textAlign: 'center',
-            }}
-          >
-            {/* Decorative characters */}
-            <img
-              src={IMGS.kazuma}
-              alt=""
-              aria-hidden="true"
-              style={{
-                position: 'absolute',
-                left: '-20px',
-                bottom: 0,
-                height: '90%',
-                width: 'auto',
-                objectFit: 'contain',
-                opacity: 0.15,
-                pointerEvents: 'none',
-                filter: 'drop-shadow(0 0 16px rgba(0,212,255,0.2))',
-              }}
-              loading="lazy"
-            />
-            <img
-              src={IMGS.darkness}
-              alt=""
-              aria-hidden="true"
-              style={{
-                position: 'absolute',
-                right: '-20px',
-                bottom: 0,
-                height: '90%',
-                width: 'auto',
-                objectFit: 'contain',
-                opacity: 0.15,
-                pointerEvents: 'none',
-                filter: 'drop-shadow(0 0 16px rgba(255,215,0,0.2))',
-              }}
-              loading="lazy"
-            />
-
-            <div style={{ position: 'relative', zIndex: 1, maxWidth: 520, margin: '0 auto' }}>
-              <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>⚔️</div>
-              <h2
-                style={{
-                  fontFamily: 'Cinzel, serif',
-                  fontSize: 'clamp(1.5rem,3vw,2.2rem)',
-                  fontWeight: 900,
-                  color: '#fff',
-                  marginBottom: '0.75rem',
-                }}
-              >
-                Begin Your Adventure
-              </h2>
-              <p style={{ color: 'var(--text-dim)', marginBottom: '2rem', lineHeight: 1.7 }}>
-                Join over 52,000 adventurers who have transformed their WhatsApp communities with the power of KonoSuba.
-              </p>
-              <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center', flexWrap: 'wrap' }}>
-                <Link to="/auth?mode=register" className="glow-btn">
-                  Create Free Account
-                </Link>
-                <a
-                  href="https://wa.me/"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="ghost-btn"
-                >
-                  Add Bot to Group
-                </a>
+        <div className="testimonials-grid">
+          {TESTIMONIALS.map((t) => (
+            <div key={t.author} className="glass-card testimonial-card">
+              <div className="testimonial-stars">★★★★★</div>
+              <p className="testimonial-text">"{t.text}"</p>
+              <div className="testimonial-author">
+                <div className="testimonial-avatar">{t.initials}</div>
+                <div>
+                  <div className="testimonial-name">{t.author}</div>
+                  <div className="testimonial-role">{t.role}</div>
+                </div>
               </div>
             </div>
-          </div>
+          ))}
         </div>
       </section>
 
-      {/* ── FOOTER ──────────────────────────────────────────────────────── */}
+      {/* CTA */}
+      <div className="section-bg-subtle">
+        <section className="section" style={{ textAlign: "center" }}>
+          <div className="section-tag">🚀 Ready?</div>
+          <h2 className="section-title">Begin Your Adventure</h2>
+          <p className="section-desc" style={{ marginBottom: "36px" }}>
+            Join over 12,000+ communities who chose KonoBot to power their WhatsApp groups. Free to start, legendary forever.
+          </p>
+          <div className="hero-actions">
+            <Link href="/auth">
+              <button className="btn btn-cyan btn-lg">⚔️ Create Free Account</button>
+            </Link>
+            <a href="https://wa.me/demo" target="_blank" rel="noopener noreferrer">
+              <button className="btn btn-outline btn-lg">💬 Try Demo Bot</button>
+            </a>
+          </div>
+        </section>
+      </div>
+
+      {/* FOOTER */}
       <footer className="footer">
         <div className="footer-inner">
-          <div className="footer-grid">
+          <div className="footer-top">
             <div className="footer-brand">
-              <a href="/" className="navbar-logo" style={{ fontSize: '1.4rem' }}>
-                ⚔ KONOSUBA
-              </a>
-              <p>
-                The ultimate KonoSuba-themed WhatsApp bot platform. Automate, moderate, and engage your community like never before.
-              </p>
-              {/* Character avatar strip in footer */}
-              <div style={{ display: 'flex', gap: '0.6rem', marginTop: '1rem' }}>
-                {[
-                  { img: IMGS.kazuma, label: 'Kazuma' },
-                  { img: IMGS.aqua, label: 'Aqua' },
-                  { img: IMGS.megumin, label: 'Megumin' },
-                  { img: IMGS.darkness, label: 'Darkness' },
-                ].map((c) => (
-                  <div
-                    key={c.label}
-                    title={c.label}
-                    style={{
-                      width: 40,
-                      height: 40,
-                      borderRadius: '50%',
-                      overflow: 'hidden',
-                      border: '2px solid rgba(0,212,255,0.18)',
-                      background: 'rgba(0,0,30,0.7)',
-                      cursor: 'pointer',
-                      transition: 'all 0.3s ease-out',
-                    }}
-                    onMouseEnter={(e) => {
-                      (e.currentTarget as HTMLElement).style.transform = 'scale(1.15)';
-                      (e.currentTarget as HTMLElement).style.borderColor = 'var(--cyan)';
-                    }}
-                    onMouseLeave={(e) => {
-                      (e.currentTarget as HTMLElement).style.transform = 'scale(1)';
-                      (e.currentTarget as HTMLElement).style.borderColor = 'rgba(0,212,255,0.18)';
-                    }}
-                  >
-                    <img src={c.img} alt={c.label} style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'top center' }} loading="lazy" />
-                  </div>
-                ))}
+              <div className="navbar-logo" style={{ position: "static" }}>
+                <div className="navbar-logo-icon">K</div>
+                KonoBot
               </div>
+              <p>God's blessing on your wonderful WhatsApp groups. The most powerful anime-themed bot platform on the internet.</p>
             </div>
-            <div className="footer-col">
-              <h4>Platform</h4>
-              <ul>
-                <li>
-                  <a href="#features">Features</a>
-                </li>
-                <li>
-                  <a href="#commands">Commands</a>
-                </li>
-                <li>
-                  <a href="#pricing">Premium</a>
-                </li>
-                <li>
-                  <Link to="/dashboard">Dashboard</Link>
-                </li>
-              </ul>
-            </div>
-            <div className="footer-col">
-              <h4>Resources</h4>
-              <ul>
-                <li>
-                  <a href="#">Documentation</a>
-                </li>
-                <li>
-                  <a href="#">API Reference</a>
-                </li>
-                <li>
-                  <a href="#">Changelog</a>
-                </li>
-                <li>
-                  <a href="#">Status</a>
-                </li>
-              </ul>
-            </div>
-            <div className="footer-col">
-              <h4>Support</h4>
-              <ul>
-                <li>
-                  <a href="#">Help Center</a>
-                </li>
-                <li>
-                  <a href="#">Discord Server</a>
-                </li>
-                <li>
-                  <a href="#">Contact Us</a>
-                </li>
-                <li>
-                  <Link to="/manager">Admin Panel</Link>
-                </li>
-              </ul>
+            <div className="footer-links-grid">
+              <div className="footer-col">
+                <h4>Product</h4>
+                <ul>
+                  <li><a href="#features">Features</a></li>
+                  <li><a href="#commands">Commands</a></li>
+                  <li><a href="#pricing">Pricing</a></li>
+                  <li><a href="#party">Bot Modes</a></li>
+                </ul>
+              </div>
+              <div className="footer-col">
+                <h4>Support</h4>
+                <ul>
+                  <li><a href="#">Documentation</a></li>
+                  <li><a href="#">FAQ</a></li>
+                  <li><a href="#">Discord Server</a></li>
+                  <li><a href="#">WhatsApp Support</a></li>
+                </ul>
+              </div>
+              <div className="footer-col">
+                <h4>Legal</h4>
+                <ul>
+                  <li><a href="#">Terms of Service</a></li>
+                  <li><a href="#">Privacy Policy</a></li>
+                  <li><a href="#">Cookie Policy</a></li>
+                  <li><a href="#">DMCA</a></li>
+                </ul>
+              </div>
             </div>
           </div>
           <div className="footer-bottom">
-            <p>© 2025 Konosuba Bot Platform. All rights reserved.</p>
-            <div style={{ display: 'flex', gap: '1.5rem' }}>
-              <a href="#" style={{ color: 'var(--text-muted)', textDecoration: 'none', fontSize: '0.8rem' }}>
-                Privacy
-              </a>
-              <a href="#" style={{ color: 'var(--text-muted)', textDecoration: 'none', fontSize: '0.8rem' }}>
-                Terms
-              </a>
-            </div>
+            <p>© 2025 KonoBot. All rights reserved. Not affiliated with KonoSuba or Yen Press.</p>
+            <p style={{ color: "var(--cyan)", fontSize: "0.8rem" }}>Made with ⚡ and explosion magic</p>
           </div>
         </div>
       </footer>

@@ -1,68 +1,58 @@
-# Konosuba WhatsApp Bot Platform
+# KonoBot — Render Deployment
 
-A premium anime-inspired WhatsApp bot management platform with dark fantasy aesthetics.
+Two standalone React + Vite frontends. Deploy each as a separate **Static Site** on Render.
 
 ## Structure
-
 ```
-/api-server      — Express API (Node.js + MongoDB)
-/konosuba-website — Landing page + user dashboard (React + Vite)
-/bot-manager     — Admin control panel (React + Vite)
+konosuba-website/   → Main landing page + user dashboard
+bot-manager/        → Admin control panel (protected by admin key)
 ```
 
-## Deploy on Render — Recommended (Single Web Service)
+## Deploy Steps (each folder = one Render Static Site)
 
-Deploy everything as **one** Render Web Service — the API server builds both frontends and serves them as static files.
+1. **Push to GitHub** (or upload zip to Render directly)
+2. On Render → New → Static Site → connect repo
+3. For `konosuba-website`:
+   - Root directory: `konosuba-website`
+   - Build command: `npm install && npm run build`
+   - Publish directory: `dist`
+4. For `bot-manager`:
+   - Root directory: `bot-manager`
+   - Build command: `npm install && npm run build`
+   - Publish directory: `dist`
 
-### In the Render Dashboard → New Web Service:
+## Environment Variables
 
-| Field | Value |
-|-------|-------|
-| **Root Directory** | *(leave blank — repo root)* |
-| **Build Command** | `cd konosuba-website && npm install && npm run build && cd ../bot-manager && npm install && npm run build && cd ../api-server && npm install` |
-| **Start Command** | `node api-server/server.js` |
+These frontends are static SPAs — no required env vars for the frontend itself.
+They call `/api/*` endpoints — point those to your backend API server URL by
+updating `src/lib/api.ts` in each app:
 
-### Environment Variables to set:
-| Variable | Description |
-|----------|-------------|
-| `MONGO_URI` | MongoDB Atlas URI |
-| `JWT_SECRET` | Long random secret for JWT signing |
-| `ADMIN_PASSWORD` | Password for admin panel |
-| `BOT_WEBHOOK_SECRET` | Optional webhook secret |
+```ts
+// konosuba-website/src/lib/api.ts
+const BASE = "https://your-api.onrender.com/api";
 
----
+// bot-manager/src/lib/api.ts
+const BASE = "https://your-api.onrender.com/api/admin";
+```
 
-## Deploy on Render — Separate Services (3 services)
+## Local Development
 
-If you prefer separate services, set `VITE_API_URL` on each frontend.
+```bash
+# konosuba-website
+cd konosuba-website && npm install && npm run dev
 
-### Service 1 — API Server (Web Service)
-- Root: `api-server`
-- Build: `npm install`
-- Start: `node server.js`
+# bot-manager
+cd bot-manager && npm install && npm run dev
+```
 
-### Service 2 — Website (Static Site)
-- Root: `konosuba-website`
-- Build: `npm install && npm run build`
-- Publish dir: `dist`
-- **Environment var**: `VITE_API_URL=https://your-api-server.onrender.com`
+## Stack
+- React 19 + TypeScript
+- Vite 7
+- Tailwind CSS v4
+- Wouter (client-side routing)
+- Poppins + Cinzel fonts (Google Fonts)
+- Custom CSS design system (dark #0B0D12, cyan #4EFFFF, gold #ffd700)
 
-### Service 3 — Bot Manager (Static Site)
-- Root: `bot-manager`
-- Build: `npm install && npm run build`
-- Publish dir: `dist`
-- **Environment var**: `VITE_API_URL=https://your-api-server.onrender.com`
-
-> The `_redirects` file in each frontend's `public/` folder handles SPA routing on Render static sites automatically.
-
----
-
-## Routes
-- `/` — Landing page
-- `/auth` — Login / Register  
-- `/dashboard` — User dashboard (requires login)
-- `/manager` — Admin bot manager (requires admin key)
-- `/api/*` — REST API
-
-## Bot Integration
-Point your Baileys bot to POST user data to `/api/website/*` with `x-admin-key` header set to your `BOT_WEBHOOK_SECRET`.
+## Bot Manager Login
+The admin panel is protected by an admin key stored in localStorage.
+Enter any key (min 4 chars) in the demo — hook up your backend `/api/admin/verify` to validate real keys.

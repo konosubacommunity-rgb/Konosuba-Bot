@@ -1,189 +1,127 @@
-import { useState, useEffect } from 'react';
-import { useLocation, useSearch, Link } from 'wouter';
-import { api, setToken, setCurrentUser, getToken } from '../lib/api';
-
-// Real KonoSuba character images — Fandom Wiki CDN
-const CHAR_IMGS = {
-  megumin: 'https://static.wikia.nocookie.net/konosuba/images/9/97/Megumin_Anime.png/revision/latest?width=500',
-  aqua:    'https://static.wikia.nocookie.net/konosuba/images/9/9e/Aqua_Anime.png/revision/latest?width=500',
-};
+import { useState } from "react";
+import { Link, useLocation } from "wouter";
+import { api, setStoredToken } from "@/lib/api";
 
 export default function Auth() {
-  const search = useSearch();
   const [, navigate] = useLocation();
-  const params = new URLSearchParams(search);
-  const [mode, setMode] = useState<'login' | 'register'>(params.get('mode') === 'register' ? 'register' : 'login');
-  const [phone, setPhone]       = useState('');
-  const [password, setPassword] = useState('');
-  const [name, setName]         = useState('');
-  const [error, setError]       = useState('');
-  const [loading, setLoading]   = useState(false);
+  const [tab, setTab] = useState<"login" | "register">("login");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
 
-  // show Megumin on login, Aqua on register
-  const charImg = mode === 'login' ? CHAR_IMGS.megumin : CHAR_IMGS.aqua;
-  const charName = mode === 'login' ? 'Megumin' : 'Aqua';
+  const [loginForm, setLoginForm] = useState({ email: "", password: "" });
+  const [regForm, setRegForm] = useState({ username: "", email: "", password: "", confirm: "" });
 
-  useEffect(() => {
-    if (getToken()) navigate('/dashboard');
-    const p = new URLSearchParams(search);
-    setMode(p.get('mode') === 'register' ? 'register' : 'login');
-    setError('');
-  }, [search, navigate]);
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault(); setError(''); setLoading(true);
+  async function handleLogin(e: React.FormEvent) {
+    e.preventDefault();
+    setError(""); setLoading(true);
     try {
-      const cleanPhone = phone.replace(/\D/g, '');
-      if (!cleanPhone || cleanPhone.length < 7) { setError('Enter a valid phone number with country code'); setLoading(false); return; }
-      let res;
-      if (mode === 'login') {
-        res = await api.login(cleanPhone, password || undefined);
-      } else {
-        res = await api.register(cleanPhone, password || undefined, name || undefined);
-      }
-      setToken(res.token);
-      setCurrentUser(res.user as Record<string, unknown>);
-      navigate('/dashboard');
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'An error occurred');
+      const res = await api.login(loginForm);
+      setStoredToken(res.token);
+      setSuccess("Welcome back! Redirecting...");
+      setTimeout(() => navigate("/dashboard"), 1200);
+    } catch (err: any) {
+      setError(err.message || "Login failed. Please try again.");
+    } finally { setLoading(false); }
+  }
+
+  async function handleRegister(e: React.FormEvent) {
+    e.preventDefault();
+    setError("");
+    if (regForm.password !== regForm.confirm) { setError("Passwords do not match."); return; }
+    if (regForm.password.length < 6) { setError("Password must be at least 6 characters."); return; }
+    setLoading(true);
+    try {
+      const res = await api.register({ username: regForm.username, email: regForm.email, password: regForm.password });
+      setStoredToken(res.token);
+      setSuccess("Account created! Welcome to KonoBot!");
+      setTimeout(() => navigate("/dashboard"), 1200);
+    } catch (err: any) {
+      setError(err.message || "Registration failed. Please try again.");
     } finally { setLoading(false); }
   }
 
   return (
-    <div className="auth-page" style={{ display: 'flex', alignItems: 'stretch', minHeight: '100vh' }}>
+    <div className="auth-page">
       <div className="auth-bg" />
 
-      {/* Floating runes */}
-      {['⚔', '✦', '◈', '⬡', '✧'].map((r, i) => (
-        <div key={i} className="rune" style={{ left: `${8 + i * 20}%`, top: `${15 + (i % 2) * 60}%`, animationDelay: `${i * 1.5}s`, fontSize: '2.5rem' }}>{r}</div>
-      ))}
-
-      {/* ── Character panel (hidden on small screens via CSS) ─────────── */}
-      <div className="auth-character-panel" style={{
-        display: 'none',
-        flex: '0 0 42%',
-        position: 'relative',
-        overflow: 'hidden',
-        background: mode === 'login'
-          ? 'linear-gradient(135deg, rgba(244,114,182,0.06), rgba(10,10,30,0.95))'
-          : 'linear-gradient(135deg, rgba(56,189,248,0.06), rgba(10,10,30,0.95))',
-      }}>
-        {/* Glow radial behind character */}
-        <div style={{
-          position: 'absolute', inset: 0,
-          background: mode === 'login'
-            ? 'radial-gradient(ellipse 70% 60% at 50% 80%, rgba(244,114,182,0.18), transparent)'
-            : 'radial-gradient(ellipse 70% 60% at 50% 80%, rgba(56,189,248,0.18), transparent)',
-        }} />
-
-        {/* Character image */}
-        <img
-          src={charImg}
-          alt={charName}
-          style={{
-            position: 'absolute', bottom: 0, left: '50%',
-            transform: 'translateX(-50%)',
-            height: '88%', width: 'auto',
-            objectFit: 'contain', objectPosition: 'bottom',
-            filter: mode === 'login'
-              ? 'drop-shadow(0 0 30px rgba(244,114,182,0.5))'
-              : 'drop-shadow(0 0 30px rgba(56,189,248,0.5))',
-            animation: 'auth-float 6s ease-in-out infinite',
-          }}
-        />
-
-        {/* Character name tag */}
-        <div style={{
-          position: 'absolute', top: '2rem', left: '50%', transform: 'translateX(-50%)',
-          background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(10px)',
-          border: `1px solid ${mode === 'login' ? 'rgba(244,114,182,0.3)' : 'rgba(56,189,248,0.3)'}`,
-          borderRadius: 12, padding: '0.5rem 1.2rem', textAlign: 'center', whiteSpace: 'nowrap',
-        }}>
-          <div style={{ fontFamily: 'Cinzel, serif', fontWeight: 800, color: '#fff', fontSize: '0.95rem' }}>{charName}</div>
-          <div style={{ color: mode === 'login' ? '#f472b6' : '#38bdf8', fontSize: '0.72rem', marginTop: 2 }}>
-            {mode === 'login' ? 'Arch-Wizard · Explosion Magic' : 'Water Goddess · Arch-Priest'}
-          </div>
-        </div>
-
-        {/* Quote */}
-        <div style={{
-          position: 'absolute', bottom: '2rem', left: '1.5rem', right: '1.5rem',
-          background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(12px)',
-          border: '1px solid rgba(255,255,255,0.07)', borderRadius: 12, padding: '0.9rem 1rem',
-        }}>
-          <p style={{ color: 'rgba(255,255,255,0.75)', fontSize: '0.8rem', lineHeight: 1.65, fontStyle: 'italic', margin: 0 }}>
-            {mode === 'login'
-              ? '"Explosion! An incomparable, ultimate magic. Today, once again, I shall use it!" — Megumin'
-              : '"What?! You dare question a goddess?! Aqua-sama is here to bless your WhatsApp!" — Aqua'}
+      <div className="glass-card auth-card">
+        <div className="auth-logo">
+          <Link href="/">
+            <div style={{ display: "inline-flex", alignItems: "center", gap: "10px", cursor: "pointer" }}>
+              <div className="navbar-logo-icon">K</div>
+              <span style={{ fontFamily: "'Cinzel', serif", fontSize: "1.2rem", fontWeight: 700, color: "var(--cyan)" }}>KonoBot</span>
+            </div>
+          </Link>
+          <p style={{ color: "var(--text-muted)", fontSize: "0.82rem", marginTop: "6px" }}>
+            {tab === "login" ? "Welcome back, adventurer" : "Join the guild today"}
           </p>
         </div>
-      </div>
 
-      <style>{`
-        @media (min-width: 900px) {
-          .auth-character-panel { display: flex !important; flex-direction: column; }
-          .auth-card { margin: auto; }
-        }
-        @keyframes auth-float {
-          0%, 100% { transform: translateX(-50%) translateY(0); }
-          50%       { transform: translateX(-50%) translateY(-14px); }
-        }
-      `}</style>
+        <div className="auth-tabs">
+          <button className={`auth-tab${tab === "login" ? " active" : ""}`} onClick={() => { setTab("login"); setError(""); setSuccess(""); }}>Login</button>
+          <button className={`auth-tab${tab === "register" ? " active" : ""}`} onClick={() => { setTab("register"); setError(""); setSuccess(""); }}>Register</button>
+        </div>
 
-      {/* ── Auth card ────────────────────────────────────────────────── */}
-      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem', position: 'relative', zIndex: 1 }}>
-        <div className="auth-card glass-card" style={{ width: '100%', maxWidth: 420 }}>
-          <Link to="/" className="auth-logo">⚔ KONOSUBA</Link>
-          <p className="auth-subtitle">
-            {mode === 'login' ? 'Welcome back, Adventurer' : 'Begin your adventure'}
-          </p>
+        {error && <div className="alert alert-error">{error}</div>}
+        {success && <div className="alert alert-success">{success}</div>}
 
-          {/* Small character icon above tabs */}
-          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '1rem' }}>
-            <div style={{ width: 54, height: 54, borderRadius: '50%', overflow: 'hidden', border: `2px solid ${mode === 'login' ? 'rgba(244,114,182,0.4)' : 'rgba(56,189,248,0.4)'}`, background: 'rgba(0,0,20,0.6)' }}>
-              <img src={charImg} alt={charName} style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'top center' }} />
-            </div>
-          </div>
-
-          <div className="auth-tabs">
-            <button className={`auth-tab${mode === 'login' ? ' active' : ''}`} onClick={() => { setMode('login'); setError(''); }}>
-              Login
-            </button>
-            <button className={`auth-tab${mode === 'register' ? ' active' : ''}`} onClick={() => { setMode('register'); setError(''); }}>
-              Register
-            </button>
-          </div>
-
-          <form onSubmit={handleSubmit}>
-            {mode === 'register' && (
-              <div className="form-group">
-                <label className="form-label">Display Name (optional)</label>
-                <input className="form-input" type="text" placeholder="Your name" value={name} onChange={e => setName(e.target.value)} />
-              </div>
-            )}
+        {tab === "login" ? (
+          <form onSubmit={handleLogin}>
             <div className="form-group">
-              <label className="form-label">Phone Number</label>
-              <input className="form-input" type="tel" placeholder="e.g. 2348012345678 (with country code)" value={phone} onChange={e => setPhone(e.target.value)} required />
+              <label className="form-label">Email Address</label>
+              <input className="form-input" type="email" placeholder="kazuma@konosuba.world" required
+                value={loginForm.email} onChange={e => setLoginForm(p => ({ ...p, email: e.target.value }))} />
             </div>
             <div className="form-group">
-              <label className="form-label">Password (optional)</label>
-              <input className="form-input" type="password" placeholder="Leave blank for phone-only login" value={password} onChange={e => setPassword(e.target.value)} />
+              <label className="form-label">Password</label>
+              <input className="form-input" type="password" placeholder="Your legendary password" required
+                value={loginForm.password} onChange={e => setLoginForm(p => ({ ...p, password: e.target.value }))} />
             </div>
-
-            {error && <div className="auth-error">⚠ {error}</div>}
-
-            <button className="glow-btn form-submit" type="submit" disabled={loading}>
-              {loading ? '⏳ Processing...' : mode === 'login' ? '⚔ Login to Dashboard' : '✦ Create Account'}
+            <button className="btn btn-cyan" type="submit" style={{ width: "100%", marginTop: "8px" }} disabled={loading}>
+              {loading ? "Authenticating..." : "⚡ Login to Dashboard"}
+            </button>
+            <p style={{ textAlign: "center", marginTop: "16px", fontSize: "0.8rem", color: "var(--text-muted)" }}>
+              <a href="#" style={{ color: "var(--cyan)" }}>Forgot your password?</a>
+            </p>
+          </form>
+        ) : (
+          <form onSubmit={handleRegister}>
+            <div className="form-group">
+              <label className="form-label">Username</label>
+              <input className="form-input" type="text" placeholder="YourAdventurerName" required
+                value={regForm.username} onChange={e => setRegForm(p => ({ ...p, username: e.target.value }))} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Email Address</label>
+              <input className="form-input" type="email" placeholder="you@example.com" required
+                value={regForm.email} onChange={e => setRegForm(p => ({ ...p, email: e.target.value }))} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Password</label>
+              <input className="form-input" type="password" placeholder="Min. 6 characters" required
+                value={regForm.password} onChange={e => setRegForm(p => ({ ...p, password: e.target.value }))} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Confirm Password</label>
+              <input className="form-input" type="password" placeholder="Repeat your password" required
+                value={regForm.confirm} onChange={e => setRegForm(p => ({ ...p, confirm: e.target.value }))} />
+            </div>
+            <p className="form-hint" style={{ marginBottom: "16px" }}>
+              By registering you agree to our <a href="#" style={{ color: "var(--cyan)" }}>Terms of Service</a> and <a href="#" style={{ color: "var(--cyan)" }}>Privacy Policy</a>.
+            </p>
+            <button className="btn btn-cyan" type="submit" style={{ width: "100%" }} disabled={loading}>
+              {loading ? "Creating account..." : "⚔️ Join the Guild"}
             </button>
           </form>
+        )}
 
-          <div className="auth-back">
-            <Link to="/">← Back to Home</Link>
-          </div>
-
-          <div style={{ marginTop: '1.5rem', padding: '1rem', background: 'rgba(0,212,255,0.04)', border: '1px solid rgba(0,212,255,0.1)', borderRadius: 10, fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: 1.6 }}>
-            <strong style={{ color: 'rgba(0,212,255,0.8)' }}>Note:</strong> Use the same phone number you use with the WhatsApp bot. Include country code without the + sign.
-          </div>
+        <div style={{ marginTop: "24px", textAlign: "center" }}>
+          <Link href="/">
+            <span style={{ fontSize: "0.8rem", color: "var(--text-muted)", cursor: "pointer" }}>
+              ← Back to homepage
+            </span>
+          </Link>
         </div>
       </div>
     </div>
