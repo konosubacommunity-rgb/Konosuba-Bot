@@ -1,201 +1,122 @@
-import { useState } from "react";
-import { useLocation } from "wouter";
-import { Eye, EyeOff, Phone, Lock, User, Globe, ArrowLeft, Loader2 } from "lucide-react";
-import { apiLogin, apiSignup, setSession } from "@/lib/api";
+import { useState, useEffect } from 'react';
+import { useLocation, useSearch, Link } from 'wouter';
+import { api, setToken, setCurrentUser } from '../lib/api';
 
 export default function Auth() {
-  const [, setLocation] = useLocation();
-  const [isSignup, setIsSignup] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const [success, setSuccess] = useState("");
-  const [showPass, setShowPass] = useState(false);
-  const [phone, setPhone] = useState("");
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  const [country, setCountry] = useState("NG");
+  const search = useSearch();
+  const [, navigate] = useLocation();
+
+  const params = new URLSearchParams(search);
+  const [mode, setMode] = useState<'login' | 'register'>(
+    params.get('mode') === 'register' ? 'register' : 'login'
+  );
+  const [phone, setPhone]       = useState('');
+  const [password, setPassword] = useState('');
+  const [name, setName]         = useState('');
+  const [error, setError]       = useState('');
+  const [loading, setLoading]   = useState(false);
+
+  useEffect(() => {
+    const p = new URLSearchParams(search);
+    setMode(p.get('mode') === 'register' ? 'register' : 'login');
+    setError('');
+  }, [search]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setError(""); setSuccess("");
-    const cleanPhone = phone.trim().replace(/[\s+\-()]/g, "");
-    if (!cleanPhone || !password) { setError("Please fill in all required fields"); return; }
-    if (cleanPhone.length < 10) { setError("Include country code (e.g. 2348012345678)"); return; }
-    if (isSignup && !username.trim()) { setError("Please choose a username"); return; }
+    setError('');
     setLoading(true);
     try {
-      let data;
-      if (isSignup) {
-        data = await apiSignup(cleanPhone, username.trim(), password, country || "NG");
-        setSession(data.token, { phone: cleanPhone, username: data.user.username });
-        setSuccess("Account created! $43,000 welcome bonus added. Redirecting...");
-      } else {
-        data = await apiLogin(cleanPhone, password);
-        setSession(data.token, { phone: cleanPhone, username: data.user.username });
-        setSuccess("Logged in! Redirecting...");
+      const cleanPhone = phone.replace(/\D/g, '');
+      if (!cleanPhone || cleanPhone.length < 7) {
+        setError('Enter a valid phone number with country code');
+        return;
       }
-      setTimeout(() => setLocation("/dashboard"), 1200);
+      let res;
+      if (mode === 'login') {
+        res = await api.login(cleanPhone, password || undefined);
+      } else {
+        res = await api.register(cleanPhone, password || undefined, name || undefined);
+      }
+      setToken(res.token);
+      setCurrentUser(res.user as Record<string, unknown>);
+      navigate('/dashboard');
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Something went wrong");
+      setError(err instanceof Error ? err.message : 'An error occurred');
     } finally {
       setLoading(false);
     }
   }
 
+  const inputStyle: React.CSSProperties = {
+    width: '100%', padding: '0.75rem 1rem',
+    background: 'rgba(255,255,255,0.07)',
+    border: '1px solid rgba(255,255,255,0.15)',
+    borderRadius: 10, color: '#fff', fontSize: '1rem', outline: 'none', boxSizing: 'border-box',
+  };
+  const labelStyle: React.CSSProperties = {
+    display: 'block', color: '#a78bfa', fontSize: '0.85rem', marginBottom: 6, fontWeight: 600,
+  };
+
   return (
-    <div style={{ minHeight: "100vh", display: "flex", fontFamily: "'Poppins', sans-serif", background: "#080812" }}>
-      <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
-      <style>{`
-        *, *::before, *::after { box-sizing: border-box; }
-        @keyframes slideUp { from{opacity:0;transform:translateY(20px)} to{opacity:1;transform:translateY(0)} }
-        @keyframes spin { to{transform:rotate(360deg)} }
-        .auth-left { flex:1; display:none; position:relative; overflow:hidden; min-height:100vh; }
-        .auth-left-bg { position:absolute; inset:0; background:url('https://cdn.myanimelist.net/images/anime/7/81309l.jpg') center/cover no-repeat; filter:brightness(.3) saturate(1.5); }
-        .auth-left-overlay { position:absolute; inset:0; background:linear-gradient(135deg,rgba(8,8,18,.85) 0%,rgba(8,8,18,.3) 100%); }
-        .auth-left-content { position:absolute; inset:0; display:flex; flex-direction:column; justify-content:flex-end; padding:2.5rem; background:linear-gradient(to top,rgba(8,8,18,.96) 0%,transparent 55%); }
-        .auth-chars { display:flex; gap:.6rem; margin-bottom:1.3rem; flex-wrap:wrap; }
-        .auth-char-img { width:48px; height:48px; border-radius:50%; object-fit:cover; object-position:top; border:2px solid rgba(79,195,247,.45); box-shadow:0 4px 14px rgba(79,195,247,.25); transition:transform .2s; }
-        .auth-char-img:hover { transform:translateY(-4px); }
-        .auth-left-title { font-size:clamp(1.5rem,2.5vw,2rem); font-weight:900; color:#fff; line-height:1.2; margin-bottom:.6rem; }
-        .auth-left-title span { background:linear-gradient(135deg,#4fc3f7,#ffd54f); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; }
-        .auth-left-sub { color:rgba(255,255,255,.4); font-size:.83rem; line-height:1.6; }
-        .auth-left-badge { display:inline-flex; align-items:center; gap:.5rem; background:rgba(79,195,247,.07); border:1px solid rgba(79,195,247,.18); border-radius:9px; padding:.4rem .8rem; margin-top:1rem; font-size:.72rem; color:#4fc3f7; font-weight:600; }
-        .auth-right { width:100%; display:flex; align-items:center; justify-content:center; padding:1.5rem; background:#080812; min-height:100vh; }
-        .auth-form-wrap { width:100%; max-width:400px; animation:slideUp .4s ease-out; }
-        .auth-logo { display:flex; align-items:center; gap:.75rem; margin-bottom:1.8rem; }
-        .auth-logo-img { width:42px; height:42px; border-radius:11px; object-fit:cover; border:2px solid rgba(79,195,247,.4); box-shadow:0 0 18px rgba(79,195,247,.22); flex-shrink:0; }
-        .auth-logo-name { font-size:1.2rem; font-weight:900; color:#fff; line-height:1.1; }
-        .auth-logo-sub { font-size:.6rem; color:#4fc3f7; font-weight:700; letter-spacing:.07em; text-transform:uppercase; }
-        .auth-heading { font-size:clamp(1.4rem,4vw,1.65rem); font-weight:800; color:#fff; margin-bottom:.25rem; }
-        .auth-subheading { color:#455a64; font-size:.85rem; margin-bottom:1.5rem; }
-        .sync-note { background:rgba(79,195,247,.05); border:1px solid rgba(79,195,247,.18); border-radius:13px; padding:.85rem 1rem; margin-bottom:1.4rem; font-size:.78rem; color:#607d8b; display:flex; gap:.55rem; align-items:flex-start; line-height:1.55; }
-        .sync-note strong { color:#4fc3f7; }
-        .form-group { margin-bottom:1.1rem; }
-        .form-label { display:flex; align-items:center; gap:.38rem; font-size:.72rem; font-weight:700; color:#455a64; margin-bottom:.42rem; text-transform:uppercase; letter-spacing:.05em; }
-        .form-input-wrap { position:relative; }
-        .form-icon { position:absolute; left:.88rem; top:50%; transform:translateY(-50%); color:#37474f; pointer-events:none; }
-        .form-input { width:100%; padding:.82rem 1rem .82rem 2.6rem; background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.08); border-radius:13px; color:#eceff1; font-size:.92rem; font-family:'Poppins',sans-serif; transition:all .2s; min-height:48px; }
-        .form-input::placeholder { color:#37474f; }
-        .form-input:focus { outline:none; border-color:rgba(79,195,247,.5); background:rgba(79,195,247,.05); box-shadow:0 0 0 3px rgba(79,195,247,.1); }
-        .form-hint { font-size:.7rem; color:#37474f; margin-top:.28rem; }
-        .pass-eye { position:absolute; right:.88rem; top:50%; transform:translateY(-50%); background:none; border:none; color:#37474f; cursor:pointer; padding:4px; display:flex; align-items:center; transition:color .2s; border-radius:6px; min-width:32px; min-height:32px; justify-content:center; }
-        .pass-eye:hover { color:#4fc3f7; }
-        .msg { padding:.72rem 1rem; border-radius:11px; margin-bottom:.9rem; font-size:.8rem; display:flex; gap:.45rem; align-items:flex-start; }
-        .msg-err { background:rgba(239,83,80,.07); border:1px solid rgba(239,83,80,.22); color:#ef9a9a; }
-        .msg-ok  { background:rgba(79,195,247,.06); border:1px solid rgba(79,195,247,.22); color:#80deea; }
-        .submit-btn { width:100%; padding:.95rem 1rem; min-height:52px; background:linear-gradient(135deg,#4fc3f7,#0288d1); color:#000; border:none; border-radius:50px; font-weight:700; font-size:.95rem; cursor:pointer; transition:all .25s; box-shadow:0 8px 24px rgba(79,195,247,.28); font-family:'Poppins',sans-serif; display:flex; align-items:center; justify-content:center; gap:.45rem; margin-top:.5rem; }
-        .submit-btn:hover:not(:disabled) { transform:translateY(-2px); box-shadow:0 13px 34px rgba(79,195,247,.48); }
-        .submit-btn:disabled { opacity:.55; cursor:not-allowed; transform:none; }
-        .divider { display:flex; align-items:center; margin:1.2rem 0; color:#263238; font-size:.75rem; }
-        .divider::before,.divider::after { content:''; flex:1; height:1px; background:rgba(255,255,255,.06); }
-        .divider::before { margin-right:.7rem; } .divider::after { margin-left:.7rem; }
-        .toggle-link { background:none; border:none; color:#4fc3f7; cursor:pointer; font-family:'Poppins',sans-serif; font-size:.83rem; text-decoration:underline; text-underline-offset:3px; padding:4px; }
-        .back-link { display:flex; align-items:center; gap:.32rem; margin-top:.75rem; color:#455a64; font-size:.8rem; cursor:pointer; justify-content:center; transition:color .2s; padding:4px; }
-        .back-link:hover { color:#4fc3f7; }
-        @media (min-width:800px) { .auth-left { display:block; max-width:420px; } .auth-right { border-left:1px solid rgba(255,255,255,.05); } }
-        @media (min-width:1100px) { .auth-left { max-width:500px; } }
-        @media (max-width:799px) { .auth-right { padding:1.2rem 1rem; align-items:flex-start; padding-top:2rem; } .auth-form-wrap { max-width:100%; } }
-        @media (max-width:400px) { .auth-right { padding:1rem .85rem; padding-top:1.5rem; } .auth-heading { font-size:1.3rem; } .form-input { font-size:.88rem; } }
-      `}</style>
-
-      <div className="auth-left">
-        <div className="auth-left-bg" />
-        <div className="auth-left-overlay" />
-        <div className="auth-left-content">
-          <div className="auth-chars">
-            {[
-              "https://cdn.myanimelist.net/images/characters/14/282523.jpg",
-              "https://cdn.myanimelist.net/images/characters/14/349249.jpg",
-              "https://cdn.myanimelist.net/images/characters/14/266229.jpg",
-              "https://cdn.myanimelist.net/images/characters/8/301302.jpg",
-            ].map((src, i) => <img key={i} className="auth-char-img" src={src} alt="character" />)}
-          </div>
-          <div className="auth-left-title"><span>Konosuba</span><br />Community Bot</div>
-          <div className="auth-left-sub">Economy, RPG, Pokémon, gambling and more — all synced live between WhatsApp and your dashboard.</div>
-          <div className="auth-left-badge">⚔️ KonoSuba: God's Blessing on This Wonderful World!</div>
+    <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg, #0f0c29, #302b63, #24243e)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'sans-serif' }}>
+      <div style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 20, padding: '2.5rem', width: '100%', maxWidth: 420 }}>
+        <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
+          <div style={{ fontSize: '3rem' }}>⚔️</div>
+          <h1 style={{ color: '#fff', margin: '0.5rem 0 0', fontSize: '1.6rem', fontWeight: 800 }}>
+            {mode === 'login' ? 'Welcome Back' : 'Join the Adventure'}
+          </h1>
+          <p style={{ color: '#94a3b8', marginTop: 6, fontSize: '0.9rem' }}>
+            {mode === 'login' ? 'Sign in with your phone number' : 'Create your adventurer account'}
+          </p>
         </div>
-      </div>
 
-      <div className="auth-right">
-        <div className="auth-form-wrap">
-          <div className="auth-logo">
-            <img className="auth-logo-img" src="https://cdn.myanimelist.net/images/characters/14/282523.jpg" alt="Aqua" />
+        {/* Mode toggle */}
+        <div style={{ display: 'flex', background: 'rgba(0,0,0,0.3)', borderRadius: 10, padding: 4, marginBottom: '1.5rem' }}>
+          {(['login', 'register'] as const).map(m => (
+            <button key={m} onClick={() => { setMode(m); setError(''); }}
+              style={{ flex: 1, padding: '0.6rem', borderRadius: 8, border: 'none', cursor: 'pointer', fontWeight: 600, fontSize: '0.9rem', transition: 'all 0.2s',
+                background: mode === m ? 'linear-gradient(90deg, #a78bfa, #f472b6)' : 'transparent',
+                color: mode === m ? '#fff' : '#94a3b8',
+              }}>
+              {m === 'login' ? 'Login' : 'Register'}
+            </button>
+          ))}
+        </div>
+
+        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          {mode === 'register' && (
             <div>
-              <div className="auth-logo-name">Konosuba</div>
-              <div className="auth-logo-sub">Community Bot</div>
+              <label style={labelStyle}>Display Name (optional)</label>
+              <input style={inputStyle} value={name} onChange={e => setName(e.target.value)} placeholder="Kazuma Satō" />
             </div>
+          )}
+
+          <div>
+            <label style={labelStyle}>Phone Number *</label>
+            <input style={inputStyle} value={phone} onChange={e => setPhone(e.target.value)} placeholder="e.g. 2348012345678" required type="tel" />
+            <div style={{ color: '#64748b', fontSize: '0.75rem', marginTop: 4 }}>Include country code, no spaces or dashes</div>
           </div>
 
-          <div className="auth-heading">{isSignup ? "Create Account" : "Welcome Back"}</div>
-          <div className="auth-subheading">{isSignup ? "Join the Konosuba community" : "Sign in to your dashboard"}</div>
-
-          <div className="sync-note">
-            <Phone size={13} style={{ flexShrink: 0, marginTop: 2, color: "#4fc3f7" }} />
-            <span>
-              {isSignup
-                ? <><strong>Use your WhatsApp number</strong> — it links the bot to your dashboard.</>
-                : <>Sign in with the <strong>WhatsApp number</strong> you registered with.</>}
-            </span>
+          <div>
+            <label style={labelStyle}>Password {mode === 'login' ? '(if set)' : '(optional)'}</label>
+            <input style={inputStyle} value={password} onChange={e => setPassword(e.target.value)} placeholder="Leave blank if not set" type="password" />
           </div>
 
-          {error && <div className="msg msg-err">❌ {error}</div>}
-          {success && <div className="msg msg-ok">✅ {success}</div>}
-
-          <form onSubmit={handleSubmit}>
-            <div className="form-group">
-              <div className="form-label"><Phone size={11} /> WhatsApp Number</div>
-              <div className="form-input-wrap">
-                <Phone size={14} className="form-icon" />
-                <input className="form-input" type="tel" placeholder="e.g. 2348012345678" value={phone} onChange={e => setPhone(e.target.value)} required autoComplete="tel" />
-              </div>
-              <div className="form-hint">Country code + number, no + or spaces (234 = Nigeria)</div>
+          {error && (
+            <div style={{ background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.4)', borderRadius: 10, padding: '0.75rem 1rem', color: '#fca5a5', fontSize: '0.9rem' }}>
+              ❌ {error}
             </div>
+          )}
 
-            {isSignup && (
-              <div className="form-group">
-                <div className="form-label"><User size={11} /> Username</div>
-                <div className="form-input-wrap">
-                  <User size={14} className="form-icon" />
-                  <input className="form-input" type="text" placeholder="Choose a display name" value={username} onChange={e => setUsername(e.target.value)} autoComplete="username" />
-                </div>
-              </div>
-            )}
+          <button type="submit" disabled={loading}
+            style={{ padding: '0.9rem', background: loading ? 'rgba(167,139,250,0.4)' : 'linear-gradient(90deg, #a78bfa, #f472b6)', border: 'none', borderRadius: 12, color: '#fff', fontWeight: 700, fontSize: '1rem', cursor: loading ? 'not-allowed' : 'pointer', marginTop: 4 }}>
+            {loading ? '...' : mode === 'login' ? 'Sign In →' : 'Create Account →'}
+          </button>
+        </form>
 
-            <div className="form-group">
-              <div className="form-label"><Lock size={11} /> Password</div>
-              <div className="form-input-wrap">
-                <Lock size={14} className="form-icon" />
-                <input className="form-input" type={showPass ? "text" : "password"} style={{ paddingRight: "2.8rem" }} placeholder={isSignup ? "Create a password" : "Enter your password"} value={password} onChange={e => setPassword(e.target.value)} required autoComplete={isSignup ? "new-password" : "current-password"} />
-                <button type="button" className="pass-eye" onClick={() => setShowPass(s => !s)} aria-label={showPass ? "Hide password" : "Show password"}>
-                  {showPass ? <EyeOff size={16} /> : <Eye size={16} />}
-                </button>
-              </div>
-            </div>
-
-            {isSignup && (
-              <div className="form-group">
-                <div className="form-label"><Globe size={11} /> Country</div>
-                <div className="form-input-wrap">
-                  <Globe size={14} className="form-icon" />
-                  <input className="form-input" type="text" placeholder="NG, US, GH, UK…" value={country} onChange={e => setCountry(e.target.value.toUpperCase())} maxLength={3} />
-                </div>
-              </div>
-            )}
-
-            <button type="submit" className="submit-btn" disabled={loading}>
-              {loading ? <><Loader2 size={16} style={{ animation: "spin 0.7s linear infinite" }} /> Processing…</> : isSignup ? "🎉 Create Account" : "Sign In →"}
-            </button>
-          </form>
-
-          <div className="divider">or</div>
-          <div style={{ textAlign: "center" }}>
-            <button className="toggle-link" onClick={() => { setIsSignup(s => !s); setError(""); setSuccess(""); }}>
-              {isSignup ? "Already have an account? Sign In" : "Don't have an account? Sign Up"}
-            </button>
-          </div>
-          <div className="back-link" onClick={() => setLocation("/")}>
-            <ArrowLeft size={13} /> Back to Home
-          </div>
+        <div style={{ textAlign: 'center', marginTop: '1.5rem', color: '#64748b', fontSize: '0.85rem' }}>
+          <Link to="/" style={{ color: '#a78bfa', textDecoration: 'none' }}>← Back to home</Link>
         </div>
       </div>
     </div>

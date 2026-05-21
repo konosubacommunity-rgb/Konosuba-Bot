@@ -1,52 +1,154 @@
-export const API_BASE = (import.meta.env.VITE_BOT_API_URL as string) || '';
+const BASE = '/api/website';
+const ADMIN_KEY = (() => {
+  try { return localStorage.getItem('adminKey') || ''; } catch { return ''; }
+})();
 
-async function apiFetch(path: string, options?: RequestInit) {
-  const res = await fetch(`${API_BASE}${path}`, options);
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.message || data.error || `Request failed: ${res.status}`);
-  return data;
+export function getStoredKey(): string {
+  try { return localStorage.getItem('adminKey') || ''; } catch { return ''; }
 }
 
-export async function apiFetchBots(adminPassword: string) {
-  return apiFetch('/api/bots', {
-    headers: { 'x-admin-password': adminPassword },
+function adminHeaders(): Record<string, string> {
+  return {
+    'Content-Type': 'application/json',
+    'x-admin-key':  getStoredKey(),
+  };
+}
+
+async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    ...opts,
+    headers: { ...adminHeaders(), ...(opts.headers || {}) },
   });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(err.error || 'Request failed');
+  }
+  return res.json() as Promise<T>;
 }
 
-export async function apiAddBot(adminPassword: string, payload: { botName: string; phoneNumber: string; avatarData?: string }) {
-  return apiFetch('/api/bots/add', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-admin-password': adminPassword },
-    body: JSON.stringify(payload),
-  });
+export interface AdminUser {
+  _id: string;
+  phone: string;
+  jid?: string;
+  lid?: string;
+  name: string;
+  wallet: number;
+  bank: number;
+  bankLimit: number;
+  netWorth: number;
+  level: number;
+  xp: number;
+  banned: boolean;
+  isMod: boolean;
+  isAdmin: boolean;
+  warnings: number;
+  registered: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+  inventory?: { item: string; qty: number }[];
+  cooldowns?: Record<string, string>;
 }
 
-export async function apiGetPairingCode(adminPassword: string, botId: string) {
-  return apiFetch(`/api/bots/${botId}/pairing-code`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-admin-password': adminPassword },
-  });
+export interface PaginationInfo {
+  page: number;
+  limit: number;
+  total: number;
+  pages: number;
 }
 
-export async function apiDeleteBot(adminPassword: string, botId: string) {
-  return apiFetch(`/api/bots/${botId}`, {
-    method: 'DELETE',
-    headers: { 'x-admin-password': adminPassword },
-  });
+export interface DuplicateUser {
+  _id: string;
+  jid?: string;
+  lid?: string;
+  phone: string;
+  name: string;
+  wallet: number;
+  bank: number;
+  level: number;
+  xp: number;
+  banned: boolean;
+  createdAt?: string;
 }
 
-export async function apiRestartBot(adminPassword: string, botId: string) {
-  return apiFetch(`/api/bots/${botId}/restart`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-admin-password': adminPassword },
-  });
+export interface DuplicateGroup {
+  phone: string;
+  count: number;
+  users: DuplicateUser[];
 }
 
-export function fileToBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
+export interface MigrationResult {
+  success: boolean;
+  normalized: number;
+  alreadySet: number;
+  lidOnly: number;
+  conflicts: number;
+  conflictList: { phone: string; userA: string; userB: string }[];
+  message: string;
 }
+
+export const adminApi = {
+  // ── Stats ──────────────────────────────────────────────────────────────
+  getStats: () => request<Record<string, unknown>>('/stats'),
+
+  // ── Users ──────────────────────────────────────────────────────────────
+  listUsers: (page = 1, limit = 20, search = '') =>
+    request<{ users: AdminUser[]; pagination: PaginationInfo }>(
+      `/admin/users?page=${page}&limit=${limit}&search=${encodeURIComponent(search)}`
+    ),
+
+  getUser: (phone: string) =>
+    request<AdminUser>(`/admin/user/${phone}`),
+
+  editUser: (phone: string, data: Partial<AdminUser>) =>
+    request<{ success: boolean; user: AdminUser }>('/admin/edit-user', {
+      method: 'PUT',
+      body: JSON.stringify({ phone, ...data }),
+    }),
+
+  banUser: (phone: string) =>
+    request<{ success: boolean }>('/admin/ban-user', {
+      method: 'POST', body: JSON.stringify({ phone }),
+    }),
+
+  unbanUser: (phone: string) =>
+    request<{ success: boolean }>('/admin/unban-user', {
+      method: 'POST', body: JSON.stringify({ phone }),
+    }),
+
+  resetCooldowns: (phone: string) =>
+    request<{ success: boolean }>('/admin/reset-cooldowns', {
+      method: 'POST', body: JSON.stringify({ phone }),
+    }),
+
+  deleteUser: (phone: string) =>
+    request<{ success: boolean }>('/admin/delete-user', {
+      method: 'DELETE', body: JSON.stringify({ phone }),
+    }),
+
+  // ── Global wipes ───────────────────────────────────────────────────────
+  wipeEconomy:   () => request<{ success: boolean; message: string }>('/admin/wipe-economy',   { method: 'POST' }),
+  wipeXP:        () => request<{ success: boolean; message: string }>('/admin/wipe-xp',        { method: 'POST' }),
+  wipeInventory: () => request<{ success: boolean; message: string }>('/admin/wipe-inventory', { method: 'POST' }),
+
+  exportUsers: () => {
+    const key = encodeURIComponent(getStoredKey());
+    const a = document.createElement('a');
+    a.href = `${BASE}/admin/export-users?adminKey=${key}`;
+    a.download = 'users.csv';
+    a.click();
+  },
+
+  // ── Duplicate detection & merge ────────────────────────────────────────
+  detectDuplicates: () =>
+    request<{ duplicates: DuplicateGroup[]; totalGroups: number }>('/admin/detect-duplicates'),
+
+  mergeUsers: (primaryPhone: string, secondaryPhone: string) =>
+    request<{ success: boolean; merged: string; deleted: string; summary: Record<string, unknown> }>(
+      '/admin/merge-users',
+      { method: 'POST', body: JSON.stringify({ primaryPhone, secondaryPhone }) }
+    ),
+
+  // ── Migration ──────────────────────────────────────────────────────────
+  runMigration: () =>
+    request<MigrationResult>('/admin/run-migration', { method: 'POST' }),
+};

@@ -3,33 +3,18 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "path";
 
-const PORT = parseInt(process.env.PORT || "24048", 10);
-const BASE = process.env.BASE_PATH || "/manager/";
+const port = Number(process.env.PORT || 3001);
+const base = process.env.BASE_PATH || "/";
 
 export default defineConfig({
-  base: BASE,
-  plugins: [
-    react(),
-    tailwindcss(),
-  ],
+  base,
+  plugins: [react(), tailwindcss()],
   resolve: {
-    alias: {
-      "@": path.resolve(__dirname, "src"),
-    },
+    alias: { "@": path.resolve(__dirname, "src") },
     dedupe: ["react", "react-dom"],
   },
-  root: path.resolve(__dirname),
-  build: {
-    outDir: path.resolve(__dirname, "dist"),
-    emptyOutDir: true,
-  },
-  server: {
-    port: PORT,
-    host: "0.0.0.0",
-    allowedHosts: true,
-  },
-  preview: {
-    port: PORT,
-    host: "0.0.0.0",
-  },
+  root: __dirname,
+  build: { outDir: "dist", emptyOutDir: true },
+  server:  { port, host: "0.0.0.0", allowedHosts: true },
+  preview: { port, host: "0.0.0.0", allowedHosts: true },
 });
