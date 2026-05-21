@@ -1,4 +1,5 @@
-const BASE = '/api/website';
+const API_ORIGIN = (import.meta as unknown as { env: Record<string, string> }).env?.VITE_API_URL ?? '';
+const BASE = `${API_ORIGIN}/api/website`;
 
 export function getToken(): string | null {
   return localStorage.getItem('konosuba_token');

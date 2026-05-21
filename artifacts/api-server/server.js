@@ -15,8 +15,8 @@ app.use('/api/website', require('./src/routes/website-sync'));
 app.use('/api/website', require('./src/routes/admin-migration'));
 
 // ─── Static frontend serving ─────────────────────────────────────────────────
-const websiteDist    = path.join(__dirname, '..', 'website', 'dist');
-const managerDist    = path.join(__dirname, '..', 'bot-manager', 'dist');
+const websiteDist = path.join(__dirname, '..', 'konosuba-website', 'dist');
+const managerDist = path.join(__dirname, '..', 'bot-manager', 'dist');
 
 // Bot Manager at /manager
 app.use('/manager', express.static(managerDist));

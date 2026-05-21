@@ -6,8 +6,6 @@ function Router() {
   return (
     <Switch>
       <Route path="/" component={Manager} />
-      <Route path="/manager" component={Manager} />
-      <Route path="/manager/" component={Manager} />
       <Route component={NotFound} />
     </Switch>
   );
@@ -15,7 +13,7 @@ function Router() {
 
 export default function App() {
   return (
-    <WouterRouter base="/manager">
+    <WouterRouter>
       <Router />
     </WouterRouter>
   );
