@@ -478,9 +478,16 @@ app.post('/api/bots/:id/restart', async (req, res) => {
 
   const bots = await BotConfig.find().lean();
   if (!bots.length) { console.log('No bots configured yet. Add one via the Bot Manager.'); return; }
-  console.log(`Auto-starting ${bots.length} bot(s)…`);
+  console.log(`Auto-starting registered bot(s)…`);
   for (const bot of bots) {
-    try { await startBot(bot.botId); } catch (e) { console.error(`  ✗ ${bot.botId}:`, e.message); }
+    try {
+      const { state } = await useMongoDBAuthState(bot.botId);
+      if (!state.creds.registered) {
+        console.log(`  ⏭ ${bot.name} — not paired yet, skipping auto-start`);
+        continue;
+      }
+      await startBot(bot.botId);
+    } catch (e) { console.error(`  ✗ ${bot.botId}:`, e.message); }
     await new Promise(r => setTimeout(r, 500));
   }
 })();
