@@ -381,9 +381,13 @@ app.delete('/api/bots/:id/logs', (req, res) => {
   res.json({ success: true });
 });
 
-app.post('/api/bots', async (req, res) => {
+async function handleAddBot(req, res) {
   try {
-    const { phone, name, avatar } = req.body;
+    const body = req.body;
+    const name  = body.botName  || body.name;
+    const phone = body.phoneNumber || body.phone;
+    const avatar = body.avatarData || body.avatar;
+
     if (!phone || !name) return res.status(400).json({ error: 'phone and name are required' });
     const rawPhone = phone.replace(/\D/g, '');
     if (rawPhone.length < 10) return res.status(400).json({ error: 'Phone number too short — include country code' });
@@ -394,32 +398,38 @@ app.post('/api/bots', async (req, res) => {
     await BotConfig.create({ botId, name: name.trim(), phone: rawPhone, avatarData, createdAt: new Date().toISOString() });
     await startBot(botId);
 
-    const inst    = botInstances.get(botId);
-    const pairing = pairingStore.get(botId);
-
-    // Wait up to 8s for pairing code to appear
+    // Wait up to 12s for pairing code to appear
     let waitMs = 0;
-    while (!pairingStore.has(botId) && waitMs < 8000) {
+    while (!pairingStore.has(botId) && waitMs < 12000) {
       await new Promise(r => setTimeout(r, 500));
       waitMs += 500;
     }
     const pairingFinal = pairingStore.get(botId);
+    const inst = botInstances.get(botId);
 
     res.json({
-      id: botId, name: name.trim(), phone: rawPhone, avatarData,
-      createdAt: new Date().toISOString(),
-      status: inst?.status || 'connecting',
+      _id:         botId,
+      botId:       botId,
+      botName:     name.trim(),
+      phoneNumber: rawPhone,
+      avatarData,
+      createdAt:   new Date().toISOString(),
+      status:      inst?.status || 'connecting',
+      isConnected: false,
       pairingCode: pairingFinal?.code || null,
-      needsCode: !!(inst?.needsCode),
+      needsCode:   !!(inst?.needsCode),
       messages: 0, uptime: 0
     });
   } catch (err) {
     console.error('Add bot error:', err);
     res.status(500).json({ error: err.message });
   }
-});
+}
 
-app.post('/api/bots/:id/request-code', async (req, res) => {
+app.post('/api/bots/add', handleAddBot);
+app.post('/api/bots',     handleAddBot);
+
+async function handlePairingCode(req, res) {
   const { id } = req.params;
   const bot = await BotConfig.findOne({ botId: id }).lean();
   if (!bot) return res.status(404).json({ error: 'Bot not found' });
@@ -441,12 +451,15 @@ app.post('/api/bots/:id/request-code', async (req, res) => {
     if (!pairing) {
       return res.status(500).json({ error: 'Could not generate pairing code — check that the phone number includes the country code (no +).' });
     }
-    res.json({ code: pairing.code });
+    res.json({ code: pairing.code, pairingCode: pairing.code });
   } catch (err) {
     console.error('Request code error:', err);
     res.status(500).json({ error: err.message });
   }
-});
+}
+
+app.post('/api/bots/:id/pairing-code',  handlePairingCode);
+app.post('/api/bots/:id/request-code',  handlePairingCode);
 
 app.delete('/api/bots/:id', async (req, res) => {
   const { id } = req.params;
