@@ -455,9 +455,10 @@ router.delete('/admin/delete-user', verifyAdminPassword, async (req, res) => {
   }
 });
 
-// ── POST /api/admin/reset-all-data ────────────────────────────────────────────
-// NOTE: route is '/admin/reset-all-data' not '/api/admin/...' — the router
-// is already mounted at /api so the full path is /api/admin/reset-all-data.
+// ── POST /api/admin/reset-all-data ───────────────────────────────────────────
+// Full path (router mounted at /api): /api/admin/reset-all-data
+// Called by the admin panel "Reset ALL Users" button in public/index.html.
+// Requires { confirm: "YES_DELETE_ALL_DATA" } in the request body.
 //
 router.post('/admin/reset-all-data', verifyAdminPassword, async (req, res) => {
   try {
@@ -469,6 +470,27 @@ router.post('/admin/reset-all-data', verifyAdminPassword, async (req, res) => {
     }
     const result = await User.deleteMany({});
     console.warn(`⚠️  ADMIN RESET: Deleted ${result.deletedCount} user(s)`);
+    return res.json({
+      success: true,
+      message: `Deleted ${result.deletedCount} user(s). All users must sign up again.`,
+      deletedCount: result.deletedCount,
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// Alias: some older HTML may call /admin/reset-users — keep it working too
+router.post('/admin/reset-users', verifyAdminPassword, async (req, res) => {
+  try {
+    if (req.body?.confirm !== 'YES_DELETE_ALL_DATA') {
+      return res.status(400).json({
+        success: false,
+        message: 'Send confirm: "YES_DELETE_ALL_DATA" in request body.',
+      });
+    }
+    const result = await User.deleteMany({});
+    console.warn(`⚠️  ADMIN RESET (alias): Deleted ${result.deletedCount} user(s)`);
     return res.json({
       success: true,
       message: `Deleted ${result.deletedCount} user(s). All users must sign up again.`,

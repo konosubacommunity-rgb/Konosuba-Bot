@@ -874,10 +874,10 @@ async function umDoResetAll() {
   const val = document.getElementById('umResetAllInput')?.value || '';
   if (val.trim() !== 'RESET ALL') { toast('Type exactly "RESET ALL" to confirm', 'error'); return; }
   try {
-    const res = await fetch('/api/admin/reset-users', {
+    const res = await fetch('/api/admin/reset-all-data', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-admin-password': umPassword },
-      body: JSON.stringify({}),
+      body: JSON.stringify({ confirm: 'YES_DELETE_ALL_DATA' }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.message);
