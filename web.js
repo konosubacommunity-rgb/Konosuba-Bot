@@ -62,6 +62,12 @@ app.get('/health', (_req, res) => res.json({ status: 'ok', ts: Date.now() }));
 const botInstances = new Map();
 const pairingStore = new Map();
 
+// ── FIX: Cancellation tokens to stop stale pairing tasks after killBot ────────
+// Each token is a plain object { cancelled: false }. The background pairing
+// task holds a reference and checks it before writing to pairingStore,
+// preventing a killed socket's task from overwriting a fresh pairing code.
+const pairingAborts = new Map();
+
 const LOG_MAX    = 100;
 const commandLogs = new Map();
 
@@ -327,15 +333,38 @@ async function startBot(botId) {
     if (hasValidCode) {
       console.log(`[${botCfg.name}] Reconnected — waiting for pairing code to be entered (${existing.code})`);
     } else {
+      // FIX: Create a cancellation token for this pairing task.
+      // If killBot() is called before the code arrives, it cancels the token
+      // so this background task won't overwrite a newer pairing code.
+      const abortToken = { cancelled: false };
+      pairingAborts.set(botId, abortToken);
+
       (async () => {
         await new Promise(r => setTimeout(r, 4000));
+
+        // Check if this task was cancelled by killBot before proceeding
+        if (abortToken.cancelled) {
+          console.log(`[${botCfg.name}] Pairing task cancelled (bot was killed)`);
+          return;
+        }
 
         const phone = botCfg.phone.replace(/\D/g, '');
         console.log(`[${botCfg.name}] Requesting pairing code for +${phone}…`);
 
         const tryPair = async (attemptsLeft) => {
+          // Check cancellation before each attempt
+          if (abortToken.cancelled) {
+            console.log(`[${botCfg.name}] Pairing attempt aborted`);
+            return;
+          }
           try {
             const raw  = await sock.requestPairingCode(phone);
+            // Check cancellation again before writing to the store —
+            // the await above may have taken time and killBot may have run.
+            if (abortToken.cancelled) {
+              console.log(`[${botCfg.name}] Pairing code received but task was cancelled — discarding`);
+              return;
+            }
             const code = raw.match(/.{1,4}/g).join('-');
             pairingStore.set(botId, { code, expiresAt: Date.now() + 10 * 60 * 1000 });
             const inst = botInstances.get(botId);
@@ -343,14 +372,16 @@ async function startBot(botId) {
             console.log(`[${botCfg.name}] ✓ Pairing code: ${code}`);
           } catch (err) {
             console.error(`[${botCfg.name}] Pairing attempt failed: ${err.message}`);
-            if (attemptsLeft > 0) {
+            if (attemptsLeft > 0 && !abortToken.cancelled) {
               console.log(`[${botCfg.name}] Retrying in 5s… (${attemptsLeft} left)`);
               await new Promise(r => setTimeout(r, 5000));
               return tryPair(attemptsLeft - 1);
             }
-            const inst = botInstances.get(botId);
-            if (inst) inst.needsCode = true;
-            console.error(`[${botCfg.name}] Could not get pairing code after all attempts`);
+            if (!abortToken.cancelled) {
+              const inst = botInstances.get(botId);
+              if (inst) inst.needsCode = true;
+              console.error(`[${botCfg.name}] Could not get pairing code after all attempts`);
+            }
           }
         };
 
@@ -362,6 +393,15 @@ async function startBot(botId) {
 
 // ── Kill a bot socket cleanly ─────────────────────────────────────────────────
 function killBot(botId) {
+  // FIX: Cancel any pending pairing background task before killing the socket.
+  // Without this, the old task's requestPairingCode() result could arrive after
+  // the new bot starts and silently overwrite the correct code in pairingStore.
+  const abort = pairingAborts.get(botId);
+  if (abort) {
+    abort.cancelled = true;
+    pairingAborts.delete(botId);
+  }
+
   const inst = botInstances.get(botId);
   if (inst?.sock) { try { inst.sock.end(new Error('killed')); } catch {} }
   botInstances.delete(botId);
@@ -460,6 +500,8 @@ app.post('/api/bots/:id/request-code', async (req, res) => {
   const bot    = await BotConfig.findOne({ botId: id }).lean();
   if (!bot) return res.status(404).json({ error: 'Bot not found' });
 
+  // Kill old socket — this also cancels any pending pairing background task
+  // so its code cannot race with the new one and corrupt the store.
   killBot(id);
 
   // Clear the session so a fresh pairing can occur
@@ -468,7 +510,19 @@ app.post('/api/bots/:id/request-code', async (req, res) => {
 
   try {
     await startBot(id);
-    const pairing = pairingStore.get(id);
+
+    // FIX: The pairing code is generated 4 seconds after startBot() returns
+    // (Baileys requires the socket to be open first). Poll the store for up
+    // to 20 seconds so we can return the real code to the frontend instead of
+    // immediately returning a false "could not generate" error.
+    let pairing = null;
+    const pollStart = Date.now();
+    while (Date.now() - pollStart < 20000) {
+      pairing = pairingStore.get(id);
+      if (pairing && pairing.expiresAt > Date.now()) break;
+      await new Promise(r => setTimeout(r, 500));
+    }
+
     if (!pairing) {
       return res.status(500).json({ error: 'Could not generate pairing code — check that the phone number is correct and includes the country code (no +).' });
     }
