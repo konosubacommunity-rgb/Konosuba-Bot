@@ -1,58 +1,138 @@
-# KonoBot — Render Deployment
+# KonoBot — Full Stack WhatsApp Bot Platform
 
-Two standalone React + Vite frontends. Deploy each as a separate **Static Site** on Render.
+  Complete Render-ready deployment: WhatsApp bot backend + user website + admin panel.
 
-## Structure
-```
-konosuba-website/   → Main landing page + user dashboard
-bot-manager/        → Admin control panel (protected by admin key)
-```
+  ---
 
-## Deploy Steps (each folder = one Render Static Site)
+  ## Structure
+  ```
+  api-server/          → WhatsApp bot (Baileys) + Express API
+    server.js          → Main entry, bot logic, message routing
+    src/commands/      → 11 command modules (general, economy, gambling, fun,
+                           games, pokemon, rpg, guild, admin, interactions, downloader)
+    src/models/        → Mongoose models (User, Group, Guild, BotConfig, BotSession)
+    src/routes/        → website-sync.js (auth, user, admin REST endpoints)
+    src/utils/         → helpers.js, mongoAuthState.js (MongoDB session store)
+    src/config.js      → Bot config (prefix, cooldowns, economy rates)
+    src/database.js    → MongoDB connection
 
-1. **Push to GitHub** (or upload zip to Render directly)
-2. On Render → New → Static Site → connect repo
-3. For `konosuba-website`:
-   - Root directory: `konosuba-website`
-   - Build command: `npm install && npm run build`
-   - Publish directory: `dist`
-4. For `bot-manager`:
-   - Root directory: `bot-manager`
-   - Build command: `npm install && npm run build`
-   - Publish directory: `dist`
+  konosuba-website/    → Main landing page + auth + user dashboard (React + Vite)
+  bot-manager/         → Admin control panel (React + Vite)
+  ```
 
-## Environment Variables
+  ---
 
-These frontends are static SPAs — no required env vars for the frontend itself.
-They call `/api/*` endpoints — point those to your backend API server URL by
-updating `src/lib/api.ts` in each app:
+  ## Deploy on Render
 
-```ts
-// konosuba-website/src/lib/api.ts
-const BASE = "https://your-api.onrender.com/api";
+  ### Option A — render.yaml (recommended)
+  1. Push this folder to a **GitHub repo**
+  2. Render Dashboard → **New** → **Blueprint** → connect the repo
+  3. Render reads `render.yaml` and creates all 3 services automatically
 
-// bot-manager/src/lib/api.ts
-const BASE = "https://your-api.onrender.com/api/admin";
-```
+  ### Option B — Manual (one service at a time)
+  Create each service separately as shown below.
 
-## Local Development
+  ---
 
-```bash
-# konosuba-website
-cd konosuba-website && npm install && npm run dev
+  ## Service Setup
 
-# bot-manager
-cd bot-manager && npm install && npm run dev
-```
+  ### 1. API Server (Web Service — Node)
+  | Setting | Value |
+  |---|---|
+  | Root Directory | `api-server` |
+  | Build Command | `npm install` |
+  | Start Command | `npm start` |
+  | Node Version | 18+ |
 
-## Stack
-- React 19 + TypeScript
-- Vite 7
-- Tailwind CSS v4
-- Wouter (client-side routing)
-- Poppins + Cinzel fonts (Google Fonts)
-- Custom CSS design system (dark #0B0D12, cyan #4EFFFF, gold #ffd700)
+  **Required environment variables:**
+  | Variable | Description |
+  |---|---|
+  | `MONGO_URI` | MongoDB Atlas connection string |
+  | `JWT_SECRET` | Any long random string (e.g. 64-char hex) |
+  | `BOT_WEBHOOK_SECRET` | Secret key for bot→website API calls |
+  | `ADMIN_PASSWORD` | Password for bot manager admin panel |
+  | `OWNER_NUMBERS` | Comma-separated WhatsApp numbers (no +), e.g. `2348012345678` |
+  | `WEBSITE_URL` | URL of your konosuba-website on Render |
 
-## Bot Manager Login
-The admin panel is protected by an admin key stored in localStorage.
-Enter any key (min 4 chars) in the demo — hook up your backend `/api/admin/verify` to validate real keys.
+  ### 2. KonoSuba Website (Static Site)
+  | Setting | Value |
+  |---|---|
+  | Root Directory | `konosuba-website` |
+  | Build Command | `npm install && npm run build` |
+  | Publish Directory | `dist` |
+
+  **Environment variable:**
+  | Variable | Value |
+  |---|---|
+  | `VITE_BOT_API_URL` | Your API server URL, e.g. `https://konosuba-api-server.onrender.com` |
+
+  ### 3. Bot Manager (Static Site)
+  | Setting | Value |
+  |---|---|
+  | Root Directory | `bot-manager` |
+  | Build Command | `npm install && npm run build` |
+  | Publish Directory | `dist` |
+
+  **Environment variable:**
+  | Variable | Value |
+  |---|---|
+  | `VITE_BOT_API_URL` | Same API server URL as above |
+
+  ---
+
+  ## How the System Works
+
+  ```
+  WhatsApp ──► Baileys (api-server) ──► MongoDB
+                    │
+                    ▼
+              Express REST API
+              /api/auth/*          ← website signup/login
+              /api/user/:phone     ← live stats sync
+              /api/admin/*         ← bot manager panel
+  ```
+
+  **Website-first registration:** Users must sign up on the website before 
+  using bot commands. The bot checks MongoDB for a registered user on every 
+  command. Stats (wallet, bank, level, XP) sync live between WhatsApp and dashboard.
+
+  ---
+
+  ## Commands (prefix: `.`)
+
+  | Module | Commands |
+  |---|---|
+  | General | .menu, .help, .ping, .info, .profile, .register, .top, .invite |
+  | Economy | .daily, .weekly, .work, .beg, .wallet, .bank, .deposit, .withdraw, .transfer, .pay, .fish, .dig, .hunt, .rob |
+  | Gambling | .slots, .coinflip, .blackjack, .roulette, .dice, .crash, .bet, .highlow |
+  | Fun | .meme, .joke, .quote, .8ball, .ship, .roast, .compliment, .truth, .dare |
+  | Games | .trivia, .guess, .wordgame, .riddle |
+  | Pokemon | .pokemon, .catch, .pokedex, .party, .release, .battle |
+  | RPG | .quest, .attack, .defend, .loot, .inventory, .equip, .stats |
+  | Guild | .gcreate, .gjoin, .gleave, .ginfo, .gtop, .gwar |
+  | Admin | .kick, .mute, .unmute, .ban, .warn, .antilink, .welcome, .goodbye |
+  | Interactions | .hug, .pat, .slap, .kiss, .poke |
+  | Downloader | .yt, .tiktok, .ig |
+
+  ---
+
+  ## MongoDB Atlas Setup
+  1. Create free cluster at https://cloud.mongodb.com
+  2. Add database user + allow all IPs (0.0.0.0/0)
+  3. Copy connection string → set as `MONGO_URI` env var
+
+  ## Local Development
+  ```bash
+  # Backend
+  cd api-server && npm install
+  MONGO_URI=... JWT_SECRET=... npm start
+
+  # Website
+  cd konosuba-website && npm install
+  VITE_BOT_API_URL=http://localhost:8080 npm run dev
+
+  # Bot Manager
+  cd bot-manager && npm install
+  VITE_BOT_API_URL=http://localhost:8080 npm run dev
+  ```
+  

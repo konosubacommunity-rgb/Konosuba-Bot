@@ -1,431 +1,308 @@
-import { useState, useEffect } from "react";
-import { Link } from "wouter";
+import { useState } from "react";
+import { useLocation } from "wouter";
+import { Zap, Shield, Users, TrendingUp, Wallet, Star, ChevronRight, MessageCircle, Swords, Trophy, Sparkles, Menu, X } from "lucide-react";
+
+const CHARS = [
+  { name: "Aqua", role: "Goddess · Useless but loveable", img: "https://cdn.myanimelist.net/images/characters/14/282523.jpg", color: "#4fc3f7", glow: "rgba(79,195,247,0.4)" },
+  { name: "Megumin", role: "Arch-Wizard · Explosion!", img: "https://cdn.myanimelist.net/images/characters/14/349249.jpg", color: "#ef5350", glow: "rgba(239,83,80,0.4)" },
+  { name: "Darkness", role: "Crusader · M-Masochist", img: "https://cdn.myanimelist.net/images/characters/14/266229.jpg", color: "#ffd54f", glow: "rgba(255,213,79,0.4)" },
+  { name: "Kazuma", role: "Adventurer · Reincarnated", img: "https://cdn.myanimelist.net/images/characters/8/301302.jpg", color: "#a5d6a7", glow: "rgba(165,214,167,0.4)" },
+];
 
 const FEATURES = [
-  { icon: "⚔️", cls: "feature-icon-cyan", title: "Auto Moderation", desc: "Kazuma-grade smart moderation. Kick spammers, warn troublemakers, and keep your group legendary." },
-  { icon: "💧", cls: "feature-icon-cyan", title: "Welcome & Farewell", desc: "Aqua-blessed greetings for every member. Custom welcome cards and goodbye messages." },
-  { icon: "💥", cls: "feature-icon-red", title: "Explosion Commands", desc: "Over 200+ commands — games, anime quotes, polls, trivia and Megumin's signature EXPLOSION skill." },
-  { icon: "🛡️", cls: "feature-icon-gold", title: "Anti-Link & Anti-Spam", desc: "Darkness-tier protection. Block malicious links, fight spam floods, and keep the party safe." },
-  { icon: "📊", cls: "feature-icon-purple", title: "Analytics Dashboard", desc: "Real-time stats on messages, members, activity peaks, and bot performance at your fingertips." },
-  { icon: "🎭", cls: "feature-icon-cyan", title: "Fun & Entertainment", desc: "Memes, anime GIFs, RPG battles, ship percentages, and much more to keep your group alive." },
-  { icon: "🔔", cls: "feature-icon-gold", title: "Reminders & Scheduler", desc: "Set reminders, schedule announcements, and automate recurring messages on any timetable." },
-  { icon: "🌐", cls: "feature-icon-purple", title: "Multi-Language", desc: "Supports 12+ languages. Your community speaks any tongue, the bot speaks all of them." },
-  { icon: "⚡", cls: "feature-icon-red", title: "Instant Response", desc: "Sub-100ms response time. The bot reacts faster than Darkness dodges an attack." },
+  { icon: <Wallet size={20} />, title: "Economy System", desc: "Wallet, bank, daily rewards, fishing, digging and more. All synced live.", color: "#4fc3f7" },
+  { icon: <Zap size={20} />, title: "Real-Time Sync", desc: "Everything you do on WhatsApp appears instantly on your dashboard.", color: "#ffd54f" },
+  { icon: <Star size={20} />, title: "Level & XP", desc: "Level up, earn XP, track your progress and climb the leaderboard.", color: "#ce93d8" },
+  { icon: <Swords size={20} />, title: "RPG & Combat", desc: "Battle monsters, join dungeons, unlock classes and gear up for war.", color: "#ef5350" },
+  { icon: <Sparkles size={20} />, title: "Pokémon", desc: "Catch Pokémon, battle, evolve, collect shiny variants and trade.", color: "#a5d6a7" },
+  { icon: <TrendingUp size={20} />, title: "Gambling", desc: "Coinflip, slots, blackjack, roulette — high risk, high reward.", color: "#ffb74d" },
+  { icon: <Shield size={20} />, title: "Group Tools", desc: "Anti-link, welcome messages, admin control and group management.", color: "#80cbc4" },
+  { icon: <Users size={20} />, title: "Community", desc: "Guilds, leaderboards, gifting, achievements and global events.", color: "#f48fb1" },
 ];
 
-const COMMAND_TABS = [
-  { id: "general", label: "General", icon: "⚔️" },
-  { id: "moderation", label: "Moderation", icon: "🛡️" },
-  { id: "fun", label: "Fun", icon: "🎭" },
-  { id: "admin", label: "Admin", icon: "👑" },
-];
-
-const COMMANDS: Record<string, { name: string; desc: string }[]> = {
-  general: [
-    { name: "!help", desc: "Show all available commands and usage guide" },
-    { name: "!info", desc: "Display bot info, uptime and version" },
-    { name: "!ping", desc: "Check bot response time and latency" },
-    { name: "!tagall", desc: "Mention all group members at once" },
-    { name: "!quote", desc: "Get a random KonoSuba quote" },
-    { name: "!weather [city]", desc: "Check weather for any city in the world" },
-    { name: "!remind [time] [msg]", desc: "Set a personal or group reminder" },
-  ],
-  moderation: [
-    { name: "!kick @user", desc: "Remove a member from the group (admin only)" },
-    { name: "!warn @user", desc: "Issue a warning. 3 warnings = auto-kick" },
-    { name: "!mute @user [time]", desc: "Temporarily mute a member" },
-    { name: "!antilink on/off", desc: "Toggle link blocking in the group" },
-    { name: "!antispam on/off", desc: "Enable spam flood protection" },
-    { name: "!promote @user", desc: "Promote member to group admin" },
-    { name: "!rules", desc: "Display group rules to all members" },
-  ],
-  fun: [
-    { name: "!explosion", desc: "Cast Megumin's signature EXPLOSION (with sound)" },
-    { name: "!ship @user1 @user2", desc: "Check love compatibility percentage" },
-    { name: "!battle @user", desc: "Start an RPG battle with another member" },
-    { name: "!meme", desc: "Get a random anime or KonoSuba meme" },
-    { name: "!trivia", desc: "Start a KonoSuba trivia quiz game" },
-    { name: "!waifu", desc: "Get your daily waifu card assignment" },
-    { name: "!sticker [text]", desc: "Convert image to sticker with text" },
-  ],
-  admin: [
-    { name: "!setprefix [char]", desc: "Change bot command prefix for this group" },
-    { name: "!setwelcome [msg]", desc: "Customize the welcome message template" },
-    { name: "!setlang [code]", desc: "Change bot language (en, id, es, pt, ...)" },
-    { name: "!broadcast [msg]", desc: "Send message to all groups (owner only)" },
-    { name: "!groupinfo", desc: "Show detailed group statistics" },
-    { name: "!reset", desc: "Reset all group bot settings to defaults" },
-    { name: "!maintenance on/off", desc: "Toggle maintenance mode for the bot" },
-  ],
-};
-
-const PLANS = [
-  {
-    name: "Free",
-    price: "0",
-    period: "/forever",
-    featured: false,
-    features: [
-      { text: "1 WhatsApp bot", ok: true },
-      { text: "50 commands", ok: true },
-      { text: "Basic moderation", ok: true },
-      { text: "5 groups max", ok: true },
-      { text: "Community support", ok: true },
-      { text: "Analytics dashboard", ok: false },
-      { text: "Priority support", ok: false },
-    ],
-    cta: "Get Started",
-    ctaCls: "btn-outline",
-  },
-  {
-    name: "Basic",
-    price: "9",
-    period: "/month",
-    featured: false,
-    features: [
-      { text: "3 WhatsApp bots", ok: true },
-      { text: "All 200+ commands", ok: true },
-      { text: "Full moderation suite", ok: true },
-      { text: "30 groups max", ok: true },
-      { text: "Analytics dashboard", ok: true },
-      { text: "Email support", ok: true },
-      { text: "Custom welcome cards", ok: false },
-    ],
-    cta: "Start Trial",
-    ctaCls: "btn-outline",
-  },
-  {
-    name: "Pro",
-    price: "24",
-    period: "/month",
-    featured: true,
-    badge: "Most Popular",
-    features: [
-      { text: "10 WhatsApp bots", ok: true },
-      { text: "All 200+ commands", ok: true },
-      { text: "Full moderation suite", ok: true },
-      { text: "Unlimited groups", ok: true },
-      { text: "Advanced analytics", ok: true },
-      { text: "Priority 24/7 support", ok: true },
-      { text: "Custom welcome cards", ok: true },
-    ],
-    cta: "Get Pro",
-    ctaCls: "btn-cyan",
-  },
-  {
-    name: "Enterprise",
-    price: "79",
-    period: "/month",
-    featured: false,
-    features: [
-      { text: "Unlimited bots", ok: true },
-      { text: "Custom commands", ok: true },
-      { text: "White-label option", ok: true },
-      { text: "Unlimited groups", ok: true },
-      { text: "Dedicated infrastructure", ok: true },
-      { text: "SLA guarantee", ok: true },
-      { text: "Dedicated manager", ok: true },
-    ],
-    cta: "Contact Sales",
-    ctaCls: "btn-ghost",
-  },
-];
-
-const TESTIMONIALS = [
-  { text: "This bot transformed our WhatsApp group completely. Moderation is effortless and the KonoSuba theme keeps everyone entertained!", author: "ArindaS", role: "Group Admin • 2,400 members", initials: "AS" },
-  { text: "Finally a WhatsApp bot that's actually fun to use. The explosion command alone is worth every penny. Megumin would be proud!", author: "RezaK", role: "Community Manager", initials: "RK" },
-  { text: "We run 15 active groups and this bot manages all of them seamlessly. Analytics are incredibly useful for tracking engagement.", author: "Priya M", role: "Enterprise Customer", initials: "PM" },
-  { text: "Setup took less than 5 minutes. Response is lightning fast and the commands are intuitive. Best WhatsApp bot platform out there.", author: "TomH", role: "Discord & WhatsApp Admin", initials: "TH" },
-  { text: "The anti-spam and anti-link features alone saved our group from chaos. It's like having Darkness guard your server 24/7.", author: "LucasB", role: "Gaming Community Lead", initials: "LB" },
-  { text: "Customer support is amazing. They helped us set up custom welcome cards in under an hour. Highly recommended!", author: "SarahK", role: "Pro User", initials: "SK" },
+const BANNERS = [
+  "https://cdn.myanimelist.net/images/anime/3/76876l.jpg",
+  "https://cdn.myanimelist.net/images/anime/8/77831l.jpg",
+  "https://cdn.myanimelist.net/images/anime/10/81308l.jpg",
+  "https://cdn.myanimelist.net/images/anime/1895/142748l.jpg",
 ];
 
 export default function Home() {
-  const [activeTab, setActiveTab] = useState("general");
-  const [stats, setStats] = useState({ users: 12800, bots: 3240, messages: 14200000, groups: 48600 });
-
-  const fmtNum = (n: number) => n >= 1000000 ? `${(n / 1000000).toFixed(1)}M+` : n >= 1000 ? `${Math.floor(n / 1000)}K+` : `${n}+`;
+  const [, setLocation] = useLocation();
+  const [menuOpen, setMenuOpen] = useState(false);
 
   return (
-    <div>
-      {/* NAVBAR */}
-      <nav className="navbar">
-        <div className="navbar-logo">
-          <div className="navbar-logo-icon">K</div>
-          KonoBot
+    <div style={{ minHeight: "100vh", fontFamily: "'Poppins', sans-serif", background: "#080812", overflowX: "hidden" }}>
+      <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
+      <style>{`
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        img { max-width: 100%; display: block; }
+        .kn-nav { display:flex; justify-content:space-between; align-items:center; padding:.9rem 1.5rem; background:rgba(8,8,18,.92); backdrop-filter:blur(24px); border-bottom:1px solid rgba(79,195,247,.12); position:sticky; top:0; z-index:200; gap:1rem; }
+        .kn-logo { display:flex; align-items:center; gap:.65rem; flex-shrink:0; }
+        .kn-logo-img { width:38px; height:38px; border-radius:10px; object-fit:cover; border:2px solid rgba(79,195,247,.4); box-shadow:0 0 14px rgba(79,195,247,.3); flex-shrink:0; }
+        .kn-logo-name { font-size:1.05rem; font-weight:900; color:#fff; line-height:1.1; }
+        .kn-logo-sub { font-size:.6rem; color:#4fc3f7; font-weight:700; letter-spacing:.08em; text-transform:uppercase; }
+        .kn-nav-links { display:flex; gap:1.6rem; list-style:none; }
+        .kn-nav-links a { color:#78909c; font-weight:500; font-size:.85rem; cursor:pointer; transition:color .2s; white-space:nowrap; }
+        .kn-nav-links a:hover { color:#4fc3f7; }
+        .kn-nav-btns { display:flex; gap:.6rem; flex-shrink:0; }
+        .btn-ghost { background:transparent; border:1px solid rgba(79,195,247,.3); color:#4fc3f7; padding:.5rem 1.1rem; border-radius:50px; font-weight:600; font-size:.82rem; cursor:pointer; transition:all .2s; font-family:'Poppins',sans-serif; white-space:nowrap; }
+        .btn-ghost:hover { background:rgba(79,195,247,.1); }
+        .btn-main { background:linear-gradient(135deg,#4fc3f7,#0288d1); color:#000; border:none; padding:.5rem 1.3rem; border-radius:50px; font-weight:700; font-size:.82rem; cursor:pointer; transition:all .25s; font-family:'Poppins',sans-serif; white-space:nowrap; box-shadow:0 4px 14px rgba(79,195,247,.3); }
+        .btn-main:hover { transform:translateY(-2px); box-shadow:0 8px 22px rgba(79,195,247,.5); }
+        .hamburger { display:none; background:none; border:1px solid rgba(79,195,247,.3); color:#4fc3f7; border-radius:8px; padding:.4rem; cursor:pointer; align-items:center; justify-content:center; }
+        .mobile-menu { display:none; flex-direction:column; gap:0; background:rgba(8,8,18,.98); border-bottom:1px solid rgba(79,195,247,.12); position:fixed; top:57px; left:0; right:0; z-index:199; backdrop-filter:blur(24px); }
+        .mobile-menu.open { display:flex; }
+        .mobile-menu a { display:block; padding:.9rem 1.5rem; color:#90a4ae; font-weight:500; font-size:.95rem; cursor:pointer; border-bottom:1px solid rgba(255,255,255,.04); transition:color .2s; }
+        .mobile-menu a:hover { color:#4fc3f7; }
+        .mobile-menu-btns { display:flex; gap:.7rem; padding:1rem 1.5rem; }
+        .mobile-menu-btns .btn-ghost,.mobile-menu-btns .btn-main { flex:1; text-align:center; padding:.7rem 1rem; font-size:.9rem; }
+        .hero { position:relative; min-height:90vh; display:flex; align-items:center; overflow:hidden; }
+        .hero-bg { position:absolute; inset:0; background:url('https://cdn.myanimelist.net/images/anime/10/81308l.jpg') center/cover no-repeat; filter:brightness(.2) saturate(1.4); }
+        .hero-overlay { position:absolute; inset:0; background:linear-gradient(135deg,rgba(8,8,18,.95) 0%,rgba(8,8,18,.6) 50%,rgba(8,8,18,.9) 100%); }
+        .hero-glow { position:absolute; width:500px; height:500px; border-radius:50%; background:radial-gradient(circle,rgba(79,195,247,.1),transparent 70%); top:-100px; right:0; pointer-events:none; }
+        .hero-inner { position:relative; z-index:2; max-width:1100px; margin:0 auto; padding:3rem 1.5rem; display:flex; gap:3rem; align-items:center; flex-wrap:wrap; width:100%; }
+        .hero-text { flex:1; min-width:0; }
+        .hero-eyebrow { display:inline-flex; align-items:center; gap:.5rem; background:rgba(79,195,247,.08); border:1px solid rgba(79,195,247,.25); border-radius:50px; padding:.35rem .9rem; margin-bottom:1.2rem; font-size:.72rem; color:#4fc3f7; font-weight:700; letter-spacing:.05em; text-transform:uppercase; }
+        .hero-title { font-size:clamp(2rem,6vw,4rem); font-weight:900; line-height:1.1; margin-bottom:1rem; letter-spacing:-.02em; }
+        .hero-title .g1 { background:linear-gradient(135deg,#fff 0%,#e0f7fa 60%,#4fc3f7 100%); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; }
+        .hero-title .g2 { background:linear-gradient(135deg,#ffd54f,#ef5350); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; }
+        .hero-desc { color:#78909c; font-size:clamp(.88rem,2vw,1rem); line-height:1.75; margin-bottom:1.8rem; }
+        .hero-btns { display:flex; gap:.8rem; flex-wrap:wrap; }
+        .btn-hero-primary { display:inline-flex; align-items:center; gap:.45rem; background:linear-gradient(135deg,#4fc3f7,#0288d1); color:#000; border:none; padding:.9rem 1.8rem; border-radius:50px; font-weight:700; font-size:.95rem; cursor:pointer; transition:all .25s; box-shadow:0 10px 28px rgba(79,195,247,.3); font-family:'Poppins',sans-serif; }
+        .btn-hero-primary:hover { transform:translateY(-3px); box-shadow:0 16px 40px rgba(79,195,247,.5); }
+        .btn-hero-sec { display:inline-flex; align-items:center; gap:.45rem; background:rgba(255,213,79,.07); border:1px solid rgba(255,213,79,.3); color:#ffd54f; padding:.9rem 1.8rem; border-radius:50px; font-weight:600; font-size:.95rem; cursor:pointer; transition:all .25s; font-family:'Poppins',sans-serif; }
+        .btn-hero-sec:hover { background:rgba(255,213,79,.14); }
+        .anime-badge { display:inline-flex; align-items:center; gap:.55rem; background:rgba(255,213,79,.05); border:1px solid rgba(255,213,79,.18); border-radius:10px; padding:.45rem .9rem; margin-top:1.4rem; font-size:.75rem; color:#ffd54f; font-weight:600; flex-wrap:wrap; }
+        .anime-badge img { width:22px; height:22px; border-radius:5px; object-fit:cover; flex-shrink:0; }
+        .hero-chars { display:grid; grid-template-columns:1fr 1fr; gap:.65rem; flex:0 0 300px; }
+        .char-card { position:relative; border-radius:16px; overflow:hidden; aspect-ratio:.72; cursor:pointer; transition:transform .3s,box-shadow .3s; border:1px solid rgba(255,255,255,.06); }
+        .char-card:hover { transform:translateY(-5px); }
+        .char-card img { width:100%; height:100%; object-fit:cover; object-position:top; display:block; }
+        .char-overlay { position:absolute; inset:0; background:linear-gradient(to top,rgba(0,0,0,.85) 0%,transparent 55%); }
+        .char-info { position:absolute; bottom:0; left:0; right:0; padding:.6rem .75rem; }
+        .char-name { font-weight:800; font-size:.78rem; margin-bottom:.08rem; }
+        .char-role { font-size:.6rem; color:rgba(255,255,255,.55); }
+        .stats-strip { background:linear-gradient(135deg,rgba(79,195,247,.05),rgba(255,213,79,.03)); border-top:1px solid rgba(79,195,247,.08); border-bottom:1px solid rgba(79,195,247,.08); padding:1.8rem 1.5rem; display:flex; justify-content:center; gap:clamp(1.5rem,5vw,4rem); flex-wrap:wrap; }
+        .stat-block { text-align:center; }
+        .stat-num { font-size:clamp(1.6rem,4vw,2.2rem); font-weight:900; background:linear-gradient(135deg,#4fc3f7,#ffd54f); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; }
+        .stat-lbl { color:#455a64; font-size:.78rem; font-weight:500; margin-top:.2rem; }
+        .kn-section { max-width:1100px; margin:0 auto; padding:4rem 1.5rem; }
+        .section-tag { display:inline-flex; align-items:center; gap:.4rem; background:rgba(206,147,216,.07); border:1px solid rgba(206,147,216,.22); border-radius:50px; padding:.28rem .85rem; font-size:.68rem; color:#ce93d8; font-weight:700; letter-spacing:.07em; text-transform:uppercase; margin-bottom:.8rem; }
+        .section-title { font-size:clamp(1.6rem,4vw,2.2rem); font-weight:900; margin-bottom:.55rem; letter-spacing:-.01em; }
+        .section-sub { color:#455a64; font-size:.9rem; margin-bottom:2.5rem; line-height:1.7; }
+        .feat-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:.9rem; }
+        .feat-card { background:rgba(255,255,255,.025); border:1px solid rgba(255,255,255,.06); border-radius:18px; padding:1.3rem; transition:all .25s; position:relative; overflow:hidden; }
+        .feat-card::before { content:''; position:absolute; inset:0; border-radius:18px; background:var(--feat-glow,transparent); opacity:0; transition:opacity .3s; }
+        .feat-card:hover { border-color:var(--feat-border,rgba(255,255,255,.12)); transform:translateY(-3px); }
+        .feat-card:hover::before { opacity:1; }
+        .feat-icon-wrap { width:42px; height:42px; border-radius:12px; display:flex; align-items:center; justify-content:center; margin-bottom:.9rem; background:var(--feat-icon-bg,rgba(255,255,255,.07)); color:var(--feat-color,#fff); flex-shrink:0; }
+        .feat-title { font-weight:700; font-size:.9rem; margin-bottom:.35rem; }
+        .feat-desc { color:#455a64; font-size:.78rem; line-height:1.6; }
+        .chars-section { background:linear-gradient(135deg,rgba(79,195,247,.03),rgba(239,83,80,.02)); border-top:1px solid rgba(255,255,255,.04); border-bottom:1px solid rgba(255,255,255,.04); padding:4rem 1.5rem; }
+        .chars-inner { max-width:1100px; margin:0 auto; }
+        .chars-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:1rem; }
+        .big-char-card { position:relative; border-radius:20px; overflow:hidden; aspect-ratio:.65; cursor:pointer; border:1px solid rgba(255,255,255,.06); transition:all .3s; }
+        .big-char-card:hover { transform:translateY(-7px); border-color:var(--char-border,rgba(255,255,255,.18)); box-shadow:0 18px 44px var(--char-glow,rgba(0,0,0,.4)); }
+        .big-char-card img { width:100%; height:100%; object-fit:cover; object-position:top; display:block; filter:brightness(.82); transition:filter .3s; }
+        .big-char-card:hover img { filter:brightness(1); }
+        .big-char-overlay { position:absolute; inset:0; background:linear-gradient(to top,rgba(0,0,0,.9) 0%,rgba(0,0,0,.1) 55%,transparent 100%); }
+        .big-char-info { position:absolute; bottom:0; left:0; right:0; padding:1rem; }
+        .big-char-name { font-weight:800; font-size:clamp(.9rem,2vw,1.05rem); margin-bottom:.22rem; }
+        .big-char-role { font-size:.68rem; color:rgba(255,255,255,.5); line-height:1.4; }
+        .char-badge { display:inline-block; padding:.14rem .5rem; border-radius:6px; font-size:.6rem; font-weight:700; margin-top:.38rem; background:var(--char-badge-bg,rgba(255,255,255,.1)); color:var(--char-badge-color,#fff); }
+        .gallery-wrap { max-width:1100px; margin:0 auto; padding:0 1.5rem 4rem; }
+        .gallery-row { display:grid; grid-template-columns:repeat(4,1fr); gap:.8rem; }
+        .gallery-img { border-radius:14px; overflow:hidden; aspect-ratio:1.4; border:1px solid rgba(255,255,255,.05); transition:all .3s; }
+        .gallery-img:hover { transform:scale(1.03); border-color:rgba(79,195,247,.28); }
+        .gallery-img img { width:100%; height:100%; object-fit:cover; display:block; }
+        .cta-section { background:linear-gradient(135deg,rgba(79,195,247,.06),rgba(239,83,80,.04),rgba(255,213,79,.05)); border-top:1px solid rgba(79,195,247,.12); padding:5rem 1.5rem; text-align:center; }
+        .cta-inner { max-width:680px; margin:0 auto; }
+        .cta-title { font-size:clamp(1.8rem,5vw,3rem); font-weight:900; margin-bottom:.9rem; letter-spacing:-.02em; }
+        .cta-desc { color:#455a64; font-size:.95rem; line-height:1.75; margin-bottom:2.2rem; }
+        .cta-steps { display:flex; justify-content:center; gap:1.2rem; flex-wrap:wrap; margin-bottom:2.2rem; }
+        .cta-step { display:flex; align-items:center; gap:.5rem; color:#607d8b; font-size:.85rem; }
+        .step-num { width:26px; height:26px; border-radius:50%; flex-shrink:0; background:linear-gradient(135deg,#4fc3f7,#0288d1); display:flex; align-items:center; justify-content:center; font-size:.68rem; font-weight:800; color:#000; }
+        footer { padding:2rem 1.5rem; text-align:center; border-top:1px solid rgba(255,255,255,.05); color:#37474f; font-size:.78rem; }
+        footer span { color:#4fc3f7; }
+        .footer-chars { display:flex; justify-content:center; gap:.45rem; margin-bottom:.7rem; flex-wrap:wrap; }
+        .footer-char-img { width:30px; height:30px; border-radius:50%; object-fit:cover; border:2px solid rgba(255,255,255,.1); }
+        @media (max-width:900px) { .kn-nav-links,.kn-nav-btns { display:none; } .hamburger { display:flex; } .hero-chars { flex:0 0 260px; } .chars-grid { grid-template-columns:repeat(2,1fr); } .gallery-row { grid-template-columns:repeat(2,1fr); } .feat-grid { grid-template-columns:repeat(2,1fr); } }
+        @media (max-width:600px) { .kn-nav { padding:.75rem 1rem; } .hero { min-height:auto; } .hero-inner { flex-direction:column; gap:1.8rem; padding:2rem 1rem; } .hero-chars { flex:none; width:100%; max-width:340px; align-self:center; } .hero-btns { flex-direction:column; } .btn-hero-primary,.btn-hero-sec { justify-content:center; width:100%; padding:.85rem 1.4rem; } .anime-badge { font-size:.68rem; } .stats-strip { gap:1.2rem; padding:1.4rem 1rem; } .kn-section { padding:3rem 1rem; } .feat-grid { grid-template-columns:1fr; } .chars-section { padding:3rem 1rem; } .chars-grid { grid-template-columns:repeat(2,1fr); gap:.7rem; } .gallery-wrap { padding:0 1rem 3rem; } .gallery-row { grid-template-columns:repeat(2,1fr); gap:.55rem; } .cta-section { padding:3.5rem 1rem; } .cta-steps { flex-direction:column; align-items:flex-start; padding-left:1rem; } footer { padding:1.5rem 1rem; } }
+      `}</style>
+
+      <nav className="kn-nav">
+        <div className="kn-logo">
+          <img className="kn-logo-img" src="https://cdn.myanimelist.net/images/characters/14/282523.jpg" alt="Aqua" />
+          <div>
+            <div className="kn-logo-name">Konosuba</div>
+            <div className="kn-logo-sub">Community Bot</div>
+          </div>
         </div>
-        <div className="navbar-links">
-          <a href="#features">Features</a>
-          <a href="#party">Party</a>
-          <a href="#commands">Commands</a>
-          <a href="#pricing">Pricing</a>
+        <ul className="kn-nav-links">
+          <li><a>Features</a></li>
+          <li><a>Characters</a></li>
+          <li><a>Commands</a></li>
+          <li><a>Community</a></li>
+        </ul>
+        <div className="kn-nav-btns">
+          <button className="btn-ghost" onClick={() => setLocation("/auth")}>Sign In</button>
+          <button className="btn-main" onClick={() => setLocation("/auth")}>Get Started</button>
         </div>
-        <div className="navbar-actions">
-          <Link href="/auth"><button className="btn btn-ghost btn-sm">Login</button></Link>
-          <Link href="/auth"><button className="btn btn-cyan btn-sm">Get Started</button></Link>
-        </div>
+        <button className="hamburger" onClick={() => setMenuOpen(o => !o)} aria-label="Menu">
+          {menuOpen ? <X size={20} /> : <Menu size={20} />}
+        </button>
       </nav>
 
-      {/* HERO */}
+      <div className={`mobile-menu${menuOpen ? " open" : ""}`}>
+        {["Features", "Characters", "Commands", "Community"].map(l => (
+          <a key={l} onClick={() => setMenuOpen(false)}>{l}</a>
+        ))}
+        <div className="mobile-menu-btns">
+          <button className="btn-ghost" onClick={() => { setMenuOpen(false); setLocation("/auth"); }}>Sign In</button>
+          <button className="btn-main" onClick={() => { setMenuOpen(false); setLocation("/auth"); }}>Get Started</button>
+        </div>
+      </div>
+
       <section className="hero">
         <div className="hero-bg" />
-        <div className="hero-grid" />
-        <div className="hero-content animate-slide-up">
-          <div className="hero-badge">
-            ⚔️ &nbsp;God's Blessing on This Wonderful Bot
-          </div>
-          <h1 className="hero-title">
-            The Most <span className="gradient-text">Legendary</span><br />
-            WhatsApp Bot <span className="gold-text">Platform</span>
-          </h1>
-          <p className="hero-subtitle">
-            Summon the power of Kazuma's party for your WhatsApp groups.
-            Auto-moderation, 200+ commands, analytics, and more — powered by the adventurer spirit.
-          </p>
-          <div className="hero-actions">
-            <Link href="/auth">
-              <button className="btn btn-cyan btn-lg">⚡ Start Free Today</button>
-            </Link>
-            <a href="#commands">
-              <button className="btn btn-outline btn-lg">📜 View Commands</button>
-            </a>
-          </div>
-          <div className="hero-stats">
-            <div className="hero-stat">
-              <span className="hero-stat-value">{fmtNum(stats.users)}</span>
-              <span className="hero-stat-label">Active Users</span>
-            </div>
-            <div className="hero-stat">
-              <span className="hero-stat-value">{fmtNum(stats.bots)}</span>
-              <span className="hero-stat-label">Bots Deployed</span>
-            </div>
-            <div className="hero-stat">
-              <span className="hero-stat-value">{fmtNum(stats.messages)}</span>
-              <span className="hero-stat-label">Messages Handled</span>
-            </div>
-            <div className="hero-stat">
-              <span className="hero-stat-value">{fmtNum(stats.groups)}</span>
-              <span className="hero-stat-label">Groups Served</span>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* FEATURES */}
-      <section id="features" className="section">
-        <div className="section-header">
-          <div className="section-tag">⚔️ Arsenal</div>
-          <h2 className="section-title">Everything Your Party Needs</h2>
-          <p className="section-desc">From Kazuma's cunning moderation to Megumin's explosive fun — your groups will never be the same.</p>
-        </div>
-        <div className="features-grid">
-          {FEATURES.map((f) => (
-            <div key={f.title} className="glass-card feature-card">
-              <div className={`feature-icon ${f.cls}`}>{f.icon}</div>
-              <h3 className="feature-title">{f.title}</h3>
-              <p className="feature-desc">{f.desc}</p>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <div className="glow-divider" />
-
-      {/* PARTY / CHARACTERS */}
-      <div className="section-bg-subtle">
-        <section id="party" className="section">
-          <div className="section-header">
-            <div className="section-tag">🎭 The Party</div>
-            <h2 className="section-title">Meet the Adventurers</h2>
-            <p className="section-desc">Each bot personality is inspired by KonoSuba's iconic party members. Choose your style.</p>
-          </div>
-          <div className="party-grid">
-            <div className="glass-card character-card kazuma">
-              <div className="character-avatar kazuma">K</div>
-              <div className="character-name">Kazuma Mode</div>
-              <div className="character-class kazuma">Adventurer</div>
-              <p className="character-desc">Strategic and cunning. Perfect balance of every feature — moderation, fun, and analytics all in one smooth operator.</p>
-            </div>
-            <div className="glass-card character-card aqua">
-              <div className="character-avatar aqua">A</div>
-              <div className="character-name">Aqua Mode</div>
-              <div className="character-class aqua">Arch Priest</div>
-              <p className="character-desc">Warmth and welcome. Spectacular greeting cards, blessing-level spam protection, and community-focused features.</p>
-            </div>
-            <div className="glass-card character-card megumin">
-              <div className="character-avatar megumin">M</div>
-              <div className="character-name">Megumin Mode</div>
-              <div className="character-class megumin">Arch Wizard</div>
-              <p className="character-desc">Explosive entertainment. Maximum fun commands, anime content, games, and EXPLOSION power at full charge.</p>
-            </div>
-            <div className="glass-card character-card darkness">
-              <div className="character-avatar darkness">D</div>
-              <div className="character-name">Darkness Mode</div>
-              <div className="character-class darkness">Crusader</div>
-              <p className="character-desc">Unbreakable defense. Iron-clad moderation, anti-raid protection, and the most aggressive spam-blocking shield available.</p>
-            </div>
-          </div>
-        </section>
-      </div>
-
-      <div className="glow-divider" />
-
-      {/* COMMANDS */}
-      <section id="commands" className="section">
-        <div className="section-header">
-          <div className="section-tag">📜 Grimoire</div>
-          <h2 className="section-title">200+ Powerful Commands</h2>
-          <p className="section-desc">Every spell in the book. Browse by category or search what you need.</p>
-        </div>
-        <div className="commands-wrapper">
-          <div className="commands-sidebar">
-            {COMMAND_TABS.map((t) => (
-              <button key={t.id} className={`cmd-tab${activeTab === t.id ? " active" : ""}`} onClick={() => setActiveTab(t.id)}>
-                {t.icon} {t.label}
+        <div className="hero-overlay" />
+        <div className="hero-glow" />
+        <div className="hero-inner">
+          <div className="hero-text">
+            <div className="hero-eyebrow">⚔️ God's Blessing on This Wonderful World!</div>
+            <h1 className="hero-title">
+              <span className="g1">Konosuba</span><br />
+              <span className="g2">Community</span><br />
+              <span style={{ color: "#fff", fontSize: "75%" }}>WhatsApp Bot</span>
+            </h1>
+            <p className="hero-desc">
+              The ultimate anime-themed WhatsApp bot — economy, RPG, Pokémon, gambling and more.
+              Register once and your entire adventure syncs live to your web dashboard.
+            </p>
+            <div className="hero-btns">
+              <button className="btn-hero-primary" onClick={() => setLocation("/auth")}>
+                Join the Party <ChevronRight size={17} />
               </button>
-            ))}
-          </div>
-          <div>
-            <div className="commands-list">
-              {(COMMANDS[activeTab] || []).map((cmd) => (
-                <div key={cmd.name} className="command-item">
-                  <span className="command-name">{cmd.name}</span>
-                  <span className="command-desc">{cmd.desc}</span>
-                </div>
-              ))}
+              <button className="btn-hero-sec" onClick={() => setLocation("/dashboard")}>
+                <MessageCircle size={15} /> View Dashboard
+              </button>
             </div>
+            <div className="anime-badge">
+              <img src="https://cdn.myanimelist.net/images/anime/1895/142748l.jpg" alt="KonoSuba" />
+              KonoSuba: God's Blessing · 3 Seasons · ⭐ 8.09 on MAL
+            </div>
+          </div>
+          <div className="hero-chars">
+            {CHARS.map(c => (
+              <div key={c.name} className="char-card" style={{ boxShadow: `0 6px 24px ${c.glow}`, border: `1px solid ${c.color}28` }}>
+                <img src={c.img} alt={c.name} />
+                <div className="char-overlay" />
+                <div className="char-info">
+                  <div className="char-name" style={{ color: c.color }}>{c.name}</div>
+                  <div className="char-role">{c.role}</div>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       </section>
 
-      <div className="glow-divider" />
-
-      {/* PRICING */}
-      <div className="section-bg-subtle">
-        <section id="pricing" className="section">
-          <div className="section-header">
-            <div className="section-tag">💎 Plans</div>
-            <h2 className="section-title">Choose Your Class</h2>
-            <p className="section-desc">Every adventurer starts somewhere. Upgrade as your party grows.</p>
+      <div className="stats-strip">
+        {[{ num: "50+", lbl: "Commands" }, { num: "4", lbl: "Characters" }, { num: "∞", lbl: "Adventures" }, { num: "24/7", lbl: "Online" }].map(s => (
+          <div className="stat-block" key={s.lbl}>
+            <div className="stat-num">{s.num}</div>
+            <div className="stat-lbl">{s.lbl}</div>
           </div>
-          <div className="pricing-grid">
-            {PLANS.map((p) => (
-              <div key={p.name} className={`glass-card pricing-card${p.featured ? " featured" : ""}`}>
-                {p.badge && <div className="pricing-badge">{p.badge}</div>}
-                <div className="pricing-name">{p.name}</div>
-                <div className="pricing-price">
-                  <span className="pricing-currency">$</span>
-                  <span className="pricing-amount">{p.price}</span>
-                </div>
-                <p className="pricing-period">{p.period}</p>
-                <ul className="pricing-features">
-                  {p.features.map((f) => (
-                    <li key={f.text}>
-                      <span className={f.ok ? "check" : "x"}>{f.ok ? "✓" : "✗"}</span>
-                      {f.text}
-                    </li>
-                  ))}
-                </ul>
-                <Link href="/auth">
-                  <button className={`btn ${p.ctaCls} w-full`} style={{ width: "100%" }}>{p.cta}</button>
-                </Link>
-              </div>
-            ))}
-          </div>
-        </section>
+        ))}
       </div>
 
-      <div className="glow-divider" />
-
-      {/* TESTIMONIALS */}
-      <section className="section">
-        <div className="section-header">
-          <div className="section-tag">⭐ Testimonials</div>
-          <h2 className="section-title">What the Guild Says</h2>
-          <p className="section-desc">Adventurers from across the realm share their experience with KonoBot.</p>
-        </div>
-        <div className="testimonials-grid">
-          {TESTIMONIALS.map((t) => (
-            <div key={t.author} className="glass-card testimonial-card">
-              <div className="testimonial-stars">★★★★★</div>
-              <p className="testimonial-text">"{t.text}"</p>
-              <div className="testimonial-author">
-                <div className="testimonial-avatar">{t.initials}</div>
-                <div>
-                  <div className="testimonial-name">{t.author}</div>
-                  <div className="testimonial-role">{t.role}</div>
-                </div>
-              </div>
+      <section className="kn-section">
+        <div className="section-tag"><Sparkles size={10} /> Bot Features</div>
+        <h2 className="section-title" style={{ color: "#fff" }}>Everything in One Bot</h2>
+        <p className="section-sub">All your favourite activities — all synced live between WhatsApp and your web dashboard.</p>
+        <div className="feat-grid">
+          {FEATURES.map(f => (
+            <div key={f.title} className="feat-card" style={{
+              ['--feat-color' as string]: f.color,
+              ['--feat-icon-bg' as string]: `${f.color}18`,
+              ['--feat-border' as string]: `${f.color}28`,
+              ['--feat-glow' as string]: `radial-gradient(ellipse at top left, ${f.color}07, transparent 70%)`,
+            }}>
+              <div className="feat-icon-wrap">{f.icon}</div>
+              <div className="feat-title" style={{ color: "#eceff1" }}>{f.title}</div>
+              <div className="feat-desc">{f.desc}</div>
             </div>
           ))}
         </div>
       </section>
 
-      {/* CTA */}
-      <div className="section-bg-subtle">
-        <section className="section" style={{ textAlign: "center" }}>
-          <div className="section-tag">🚀 Ready?</div>
-          <h2 className="section-title">Begin Your Adventure</h2>
-          <p className="section-desc" style={{ marginBottom: "36px" }}>
-            Join over 12,000+ communities who chose KonoBot to power their WhatsApp groups. Free to start, legendary forever.
-          </p>
-          <div className="hero-actions">
-            <Link href="/auth">
-              <button className="btn btn-cyan btn-lg">⚔️ Create Free Account</button>
-            </Link>
-            <a href="https://wa.me/demo" target="_blank" rel="noopener noreferrer">
-              <button className="btn btn-outline btn-lg">💬 Try Demo Bot</button>
-            </a>
+      <section className="chars-section">
+        <div className="chars-inner">
+          <div style={{ textAlign: "center", marginBottom: "2.2rem" }}>
+            <div className="section-tag"><Trophy size={10} /> The Party</div>
+            <h2 className="section-title" style={{ color: "#fff" }}>Meet the Characters</h2>
+            <p className="section-sub" style={{ maxWidth: 480, margin: "0 auto" }}>The bot is themed around these legendary characters from KonoSuba.</p>
           </div>
-        </section>
-      </div>
-
-      {/* FOOTER */}
-      <footer className="footer">
-        <div className="footer-inner">
-          <div className="footer-top">
-            <div className="footer-brand">
-              <div className="navbar-logo" style={{ position: "static" }}>
-                <div className="navbar-logo-icon">K</div>
-                KonoBot
+          <div className="chars-grid">
+            {[
+              { name: "Aqua", role: "Goddess of Water\nUseless, crybaby, but weirdly endearing.", img: CHARS[0].img, color: CHARS[0].color, glow: CHARS[0].glow, badge: "Goddess", badgeBg: "rgba(79,195,247,.18)", badgeColor: "#4fc3f7" },
+              { name: "Megumin", role: "Arch-Wizard\nOne explosion per day. That's all she needs.", img: CHARS[1].img, color: CHARS[1].color, glow: CHARS[1].glow, badge: "Wizard", badgeBg: "rgba(239,83,80,.18)", badgeColor: "#ef5350" },
+              { name: "Darkness", role: "Crusader · Lalatina\nNoblewomen by day, battle-junkie by heart.", img: CHARS[2].img, color: CHARS[2].color, glow: CHARS[2].glow, badge: "Crusader", badgeBg: "rgba(255,213,79,.18)", badgeColor: "#ffd54f" },
+              { name: "Kazuma", role: "Adventurer\nReincarnated NEET. Surprisingly the most capable.", img: CHARS[3].img, color: CHARS[3].color, glow: CHARS[3].glow, badge: "Adventurer", badgeBg: "rgba(165,214,167,.18)", badgeColor: "#a5d6a7" },
+            ].map(c => (
+              <div key={c.name} className="big-char-card" style={{
+                ['--char-border' as string]: `${c.color}45`,
+                ['--char-glow' as string]: c.glow,
+                ['--char-badge-bg' as string]: c.badgeBg,
+                ['--char-badge-color' as string]: c.badgeColor,
+              }}>
+                <img src={c.img} alt={c.name} />
+                <div className="big-char-overlay" />
+                <div className="big-char-info">
+                  <div className="big-char-name" style={{ color: c.color }}>{c.name}</div>
+                  <div className="big-char-role">{c.role}</div>
+                  <span className="char-badge">{c.badge}</span>
+                </div>
               </div>
-              <p>God's blessing on your wonderful WhatsApp groups. The most powerful anime-themed bot platform on the internet.</p>
-            </div>
-            <div className="footer-links-grid">
-              <div className="footer-col">
-                <h4>Product</h4>
-                <ul>
-                  <li><a href="#features">Features</a></li>
-                  <li><a href="#commands">Commands</a></li>
-                  <li><a href="#pricing">Pricing</a></li>
-                  <li><a href="#party">Bot Modes</a></li>
-                </ul>
-              </div>
-              <div className="footer-col">
-                <h4>Support</h4>
-                <ul>
-                  <li><a href="#">Documentation</a></li>
-                  <li><a href="#">FAQ</a></li>
-                  <li><a href="#">Discord Server</a></li>
-                  <li><a href="#">WhatsApp Support</a></li>
-                </ul>
-              </div>
-              <div className="footer-col">
-                <h4>Legal</h4>
-                <ul>
-                  <li><a href="#">Terms of Service</a></li>
-                  <li><a href="#">Privacy Policy</a></li>
-                  <li><a href="#">Cookie Policy</a></li>
-                  <li><a href="#">DMCA</a></li>
-                </ul>
-              </div>
-            </div>
-          </div>
-          <div className="footer-bottom">
-            <p>© 2025 KonoBot. All rights reserved. Not affiliated with KonoSuba or Yen Press.</p>
-            <p style={{ color: "var(--cyan)", fontSize: "0.8rem" }}>Made with ⚡ and explosion magic</p>
+            ))}
           </div>
         </div>
+      </section>
+
+      <div className="gallery-wrap">
+        <div className="gallery-row">
+          {BANNERS.map((src, i) => (
+            <div key={i} className="gallery-img">
+              <img src={src} alt={`KonoSuba ${i + 1}`} />
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <section className="cta-section">
+        <div className="cta-inner">
+          <h2 className="cta-title" style={{ color: "#fff" }}>Ready to Join the<br /><span style={{ background: "linear-gradient(135deg,#4fc3f7,#ffd54f)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>Adventure?</span></h2>
+          <p className="cta-desc">Sign up in 30 seconds. Use your WhatsApp number and your stats sync instantly between the app and the bot.</p>
+          <div className="cta-steps">
+            {["Sign up with your WhatsApp number", "Message the bot to link your account", "Watch your stats sync live on the dashboard"].map((step, i) => (
+              <div className="cta-step" key={i}>
+                <div className="step-num">{i + 1}</div>
+                {step}
+              </div>
+            ))}
+          </div>
+          <button className="btn-hero-primary" onClick={() => setLocation("/auth")} style={{ fontSize: "1rem", padding: "1rem 2.2rem" }}>
+            Create Your Account <ChevronRight size={18} />
+          </button>
+        </div>
+      </section>
+
+      <footer>
+        <div className="footer-chars">
+          {CHARS.map(c => <img key={c.name} className="footer-char-img" src={c.img} alt={c.name} />)}
+        </div>
+        © 2025 <span>Konosuba Community Bot</span>. Built with ⚔️ and magic.
       </footer>
     </div>
   );

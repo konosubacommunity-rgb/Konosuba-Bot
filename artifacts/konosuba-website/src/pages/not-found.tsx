@@ -1,21 +1,21 @@
-import { Link } from "wouter";
+import { Card, CardContent } from "@/components/ui/card";
+import { AlertCircle } from "lucide-react";
 
 export default function NotFound() {
   return (
-    <div style={{
-      minHeight: "100vh", display: "flex", alignItems: "center",
-      justifyContent: "center", background: "var(--bg-deep)", padding: "24px",
-    }}>
-      <div className="glass-card" style={{ padding: "48px 40px", textAlign: "center", maxWidth: "440px", width: "100%" }}>
-        <div style={{ fontSize: "3.5rem", marginBottom: "16px" }}>💥</div>
-        <h1 style={{ fontFamily: "'Cinzel', serif", fontSize: "1.8rem", fontWeight: 700, color: "#fff", marginBottom: "8px" }}>404 — Not Found</h1>
-        <p style={{ color: "var(--text-secondary)", marginBottom: "28px", lineHeight: 1.7 }}>
-          Even Megumin couldn't find this page. It may have been destroyed by an Explosion or it never existed.
-        </p>
-        <Link href="/">
-          <button className="btn btn-cyan">⚔️ Return to Base</button>
-        </Link>
-      </div>
+    <div className="min-h-screen w-full flex items-center justify-center bg-gray-50">
+      <Card className="w-full max-w-md mx-4">
+        <CardContent className="pt-6">
+          <div className="flex mb-4 gap-2">
+            <AlertCircle className="h-8 w-8 text-red-500" />
+            <h1 className="text-2xl font-bold text-gray-900">404 Page Not Found</h1>
+          </div>
+
+          <p className="mt-4 text-sm text-gray-600">
+            Did you forget to add the page to the router?
+          </p>
+        </CardContent>
+      </Card>
     </div>
   );
 }

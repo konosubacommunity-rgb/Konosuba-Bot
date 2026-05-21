@@ -6,7 +6,7 @@ const ownerNumbersList = ownerNumbersEnv
 
 module.exports = {
   OWNER_NUMBERS: ownerNumbersList,
-  OWNER_JID: ownerNumbersList.length > 0 ? `${ownerNumbersList[0]}@s.whatsapp.net` : '12232838631673@s.whatsapp.net',
+  OWNER_JID: ownerNumbersList.length > 0 ? `${ownerNumbersList[0]}@lid` : '12232838631673@lid',
   BOT_NAME: 'Aqua',
   COMMUNITY: 'KONOSUBA',
   PREFIX: '.',

@@ -1,670 +1,681 @@
-import { useState, useEffect, useCallback } from "react";
-import { adminApi } from "@/lib/api";
-import type { AdminStats, AdminBot, AdminUser, Duplicate, LogEntry } from "@/lib/api";
+import { useState, useCallback, useRef, useEffect } from "react";
+import {
+  Plus, RefreshCw, Trash2, Key, RotateCcw, Bot, Lock, Eye, EyeOff,
+  Upload, X, Loader2, CheckCircle, AlertCircle, Wifi, WifiOff, Copy,
+  Users, Search, Ban, Edit2, ChevronLeft, ChevronRight, Shield, Zap, DollarSign
+} from "lucide-react";
+import {
+  apiFetchBots, apiAddBot, apiGetPairingCode, apiDeleteBot, apiRestartBot, fileToBase64,
+  apiFetchUsers, apiSearchUser, apiEditUser, apiBanUser, apiResetUserCooldowns,
+  apiResetUser, apiDeleteUser, apiDeleteAllUsers, apiMergeUsers,
+  formatMoney, type UserRecord
+} from "@/lib/api";
 
-// ─── MOCK DATA ─────────────────────────────────────────────────────────────────
-const MOCK_STATS: AdminStats = {
-  totalBots: 47, activeBots: 38, totalUsers: 1284, premiumUsers: 312,
-  totalGroups: 9840, messagesHandled: 14200000, duplicatesFound: 23, uptime: "99.7%",
-};
-
-const MOCK_BOTS: AdminBot[] = [
-  { id: "b01", name: "KaBotz Main", number: "+62 812-3456-7890", status: "active", groups: 124, users: 8420, messagesHandled: 1432000, owner: "Kazuma@main", createdAt: "2025-01-10", lastSeen: "1 min ago" },
-  { id: "b02", name: "Aqua Support", number: "+62 857-1234-5678", status: "active", groups: 67, users: 4100, messagesHandled: 670000, owner: "arinda@store", createdAt: "2025-02-14", lastSeen: "3 min ago" },
-  { id: "b03", name: "Megumin Fun", number: "+1 555-9012", status: "inactive", groups: 0, users: 0, messagesHandled: 18400, owner: "reza@gaming", createdAt: "2025-03-01", lastSeen: "2 days ago" },
-  { id: "b04", name: "Darkness Guard", number: "+44 7700-900123", status: "active", groups: 89, users: 6200, messagesHandled: 890000, owner: "priya@community", createdAt: "2025-02-01", lastSeen: "5 min ago" },
-  { id: "b05", name: "YunYun Helper", number: "+81 90-1234-5678", status: "connecting", groups: 12, users: 760, messagesHandled: 45000, owner: "lucas@japan", createdAt: "2025-04-20", lastSeen: "Now" },
-  { id: "b06", name: "Wiz Magic Bot", number: "+55 11-98765-4321", status: "error", groups: 0, users: 0, messagesHandled: 0, owner: "sarah@br", createdAt: "2025-05-01", lastSeen: "Error" },
-];
-
-const MOCK_USERS: AdminUser[] = [
-  { id: "u01", username: "Kazuma_Main", email: "kazuma@konosuba.world", plan: "enterprise", bots: 5, status: "active", joinedAt: "2025-01-05", lastLogin: "Today" },
-  { id: "u02", username: "ArindaStore", email: "arinda@store.id", plan: "pro", bots: 3, status: "active", joinedAt: "2025-01-18", lastLogin: "Yesterday" },
-  { id: "u03", username: "RezaGaming", email: "reza@gamer.com", plan: "basic", bots: 1, status: "active", joinedAt: "2025-02-01", lastLogin: "2 days ago" },
-  { id: "u04", username: "PriyaCom", email: "priya@community.in", plan: "pro", bots: 2, status: "active", joinedAt: "2025-02-10", lastLogin: "Today" },
-  { id: "u05", username: "LucasJP", email: "lucas@otaku.jp", plan: "basic", bots: 1, status: "active", joinedAt: "2025-03-15", lastLogin: "5 days ago" },
-  { id: "u06", username: "SarahBR", email: "sarah@whatsapp.br", plan: "free", bots: 1, status: "suspended", joinedAt: "2025-04-20", lastLogin: "1 week ago" },
-  { id: "u07", username: "TomH_UK", email: "tom@discord.uk", plan: "pro", bots: 2, status: "active", joinedAt: "2025-01-28", lastLogin: "Today" },
-  { id: "u08", username: "MeguFan99", email: "megu@anime.id", plan: "free", bots: 1, status: "active", joinedAt: "2025-05-01", lastLogin: "3 days ago" },
-];
-
-const MOCK_DUPLICATES: Duplicate[] = [
-  { id: "d01", number: "+62 812-9999-0001", occurrences: 3, groups: ["Anime Fans ID", "Otaku Hangout", "KonoSuba Lovers"], firstSeen: "2025-05-10" },
-  { id: "d02", number: "+62 857-8888-0002", occurrences: 2, groups: ["Gaming Community", "Jual Beli"], firstSeen: "2025-05-12" },
-  { id: "d03", number: "+1 555-3030", occurrences: 4, groups: ["Anime Fans ID", "Test Group", "Gaming", "Other"], firstSeen: "2025-05-15" },
-];
-
-const MOCK_LOGS: LogEntry[] = [
-  { id: "l01", level: "info", message: "Bot 'KaBotz Main' processed 1,200 messages in last hour", botId: "b01", timestamp: "2026-05-21 14:32:01" },
-  { id: "l02", level: "warn", message: "Bot 'YunYun Helper' connection unstable — retrying", botId: "b05", timestamp: "2026-05-21 14:30:45" },
-  { id: "l03", level: "error", message: "Bot 'Wiz Magic Bot' failed to authenticate — session expired", botId: "b06", timestamp: "2026-05-21 14:28:12" },
-  { id: "l04", level: "info", message: "User 'SarahBR' suspended for ToS violation", timestamp: "2026-05-21 14:25:00" },
-  { id: "l05", level: "info", message: "Daily cleanup: 3 duplicate entries removed", timestamp: "2026-05-21 14:00:00" },
-  { id: "l06", level: "warn", message: "High spam rate detected in group 'Jual Beli Online'", botId: "b01", timestamp: "2026-05-21 13:55:33" },
-  { id: "l07", level: "info", message: "New user registered: MeguFan99 (free plan)", timestamp: "2026-05-21 13:40:18" },
-  { id: "l08", level: "error", message: "Rate limit exceeded for admin endpoint /api/admin/broadcast", timestamp: "2026-05-21 12:15:09" },
-];
-
-const fmtNum = (n: number) => n >= 1000000 ? `${(n / 1000000).toFixed(1)}M` : n >= 1000 ? `${(n / 1000).toFixed(0)}K` : String(n);
-
-// ─── STATUS BADGE ────────────────────────────────────────────────────────────
-function StatusBadge({ status }: { status: string }) {
-  const map: Record<string, string> = {
-    active: "badge-green", inactive: "badge-muted", connecting: "badge-gold",
-    error: "badge-red", suspended: "badge-red", free: "badge-muted",
-    basic: "badge-cyan", pro: "badge-purple", enterprise: "badge-gold",
-    info: "badge-cyan", warn: "badge-gold", warning: "badge-gold",
-  };
-  return <span className={`badge ${map[status] || "badge-muted"}`}>{status}</span>;
+interface BotData {
+  _id?: string;
+  botId?: string;
+  botName?: string;
+  name?: string;
+  phoneNumber?: string;
+  phone?: string;
+  isConnected?: boolean;
+  status?: string;
+  avatarData?: string;
+  createdAt?: string;
+  lastSeen?: string;
+  jid?: string;
 }
 
-// ─── CONFIRM DIALOG ─────────────────────────────────────────────────────────
-function Confirm({ msg, onConfirm, onCancel }: { msg: string; onConfirm: () => void; onCancel: () => void }) {
+// ── Toast ──────────────────────────────────────────────────────────────────────
+function Toast({ msg, type, onClose }: { msg: string; type: "success" | "error" | "info"; onClose: () => void }) {
+  useEffect(() => { const t = setTimeout(onClose, 4500); return () => clearTimeout(t); }, [onClose]);
+  const c = { success: { bg: "rgba(165,214,167,.1)", border: "rgba(165,214,167,.3)", text: "#a5d6a7", icon: "✅" }, error: { bg: "rgba(239,83,80,.1)", border: "rgba(239,83,80,.3)", text: "#ef9a9a", icon: "❌" }, info: { bg: "rgba(79,195,247,.08)", border: "rgba(79,195,247,.28)", text: "#80deea", icon: "ℹ️" } }[type];
   return (
-    <div className="modal-overlay" onClick={onCancel}>
-      <div className="modal" style={{ maxWidth: "380px" }} onClick={e => e.stopPropagation()}>
-        <div className="modal-header">
-          <span className="modal-title">⚠️ Confirm Action</span>
-          <button className="modal-close" onClick={onCancel}>✕</button>
-        </div>
-        <div className="modal-body">
-          <p style={{ color: "var(--text-secondary)", fontSize: "0.9rem", lineHeight: 1.6 }}>{msg}</p>
-        </div>
-        <div className="modal-footer">
-          <button className="btn btn-ghost btn-sm" onClick={onCancel}>Cancel</button>
-          <button className="btn btn-danger btn-sm" onClick={onConfirm}>Confirm</button>
+    <div style={{ position: "fixed", top: "1.2rem", right: "1.2rem", zIndex: 9999, background: c.bg, border: `1px solid ${c.border}`, borderRadius: 14, padding: ".85rem 1.1rem", display: "flex", gap: ".6rem", alignItems: "flex-start", maxWidth: 360, boxShadow: "0 8px 32px rgba(0,0,0,.5)", backdropFilter: "blur(16px)", animation: "slideIn .25s ease" }}>
+      <span style={{ flexShrink: 0 }}>{c.icon}</span>
+      <span style={{ color: c.text, fontSize: ".82rem", lineHeight: 1.5, flex: 1 }}>{msg}</span>
+      <button onClick={onClose} style={{ background: "none", border: "none", color: c.text, cursor: "pointer", padding: "2px", opacity: .7, flexShrink: 0 }}><X size={13} /></button>
+    </div>
+  );
+}
+
+// ── Confirm Dialog ─────────────────────────────────────────────────────────────
+function ConfirmDialog({ title, message, confirmLabel, danger, onConfirm, onCancel }: {
+  title: string; message: string; confirmLabel?: string; danger?: boolean;
+  onConfirm: () => void; onCancel: () => void;
+}) {
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 2000, background: "rgba(0,0,0,.75)", display: "flex", alignItems: "center", justifyContent: "center", padding: "1rem", backdropFilter: "blur(8px)" }}>
+      <div style={{ background: "#0d1117", border: `1px solid ${danger ? "rgba(239,68,68,.25)" : "rgba(99,102,241,.2)"}`, borderRadius: 20, padding: "1.8rem", maxWidth: 380, width: "100%" }}>
+        <div style={{ fontWeight: 800, fontSize: "1.05rem", color: "#e2e8f0", marginBottom: ".6rem" }}>{title}</div>
+        <div style={{ color: "#475569", fontSize: ".85rem", lineHeight: 1.6, marginBottom: "1.4rem" }}>{message}</div>
+        <div style={{ display: "flex", gap: ".7rem" }}>
+          <button onClick={onCancel} style={{ flex: 1, background: "rgba(255,255,255,.04)", border: "1px solid rgba(255,255,255,.08)", color: "#64748b", borderRadius: 11, padding: ".72rem", fontFamily: "inherit", fontSize: ".85rem", fontWeight: 600, cursor: "pointer" }}>Cancel</button>
+          <button onClick={onConfirm} style={{ flex: 1, background: danger ? "rgba(239,68,68,.15)" : "linear-gradient(135deg,#6366f1,#4f46e5)", border: danger ? "1px solid rgba(239,68,68,.35)" : "none", color: danger ? "#f87171" : "#fff", borderRadius: 11, padding: ".72rem", fontFamily: "inherit", fontSize: ".85rem", fontWeight: 700, cursor: "pointer" }}>
+            {confirmLabel || "Confirm"}
+          </button>
         </div>
       </div>
     </div>
   );
 }
 
-// ─── LOGIN SCREEN ────────────────────────────────────────────────────────────
-function LoginScreen({ onAuth }: { onAuth: () => void }) {
-  const [key, setKey] = useState("");
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
+// ── Pairing Modal ──────────────────────────────────────────────────────────────
+function PairingModal({ code, onClose }: { code: string; onClose: () => void }) {
+  const [copied, setCopied] = useState(false);
+  function copy() { navigator.clipboard.writeText(code).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); }); }
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,.7)", display: "flex", alignItems: "center", justifyContent: "center", padding: "1rem", backdropFilter: "blur(8px)" }}>
+      <div style={{ background: "#0d1117", border: "1px solid rgba(79,195,247,.2)", borderRadius: 22, padding: "2rem 1.8rem", maxWidth: 380, width: "100%", textAlign: "center" }}>
+        <div style={{ width: 56, height: 56, borderRadius: "50%", background: "linear-gradient(135deg,rgba(79,195,247,.15),rgba(79,195,247,.05))", border: "2px solid rgba(79,195,247,.3)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 1.2rem" }}>
+          <Key size={24} style={{ color: "#4fc3f7" }} />
+        </div>
+        <h3 style={{ color: "#eceff1", fontWeight: 800, fontSize: "1.15rem", marginBottom: ".4rem" }}>Pairing Code</h3>
+        <p style={{ color: "#455a64", fontSize: ".82rem", marginBottom: "1.4rem", lineHeight: 1.6 }}>Open WhatsApp → Linked Devices → Link a device → Enter this code:</p>
+        <div style={{ background: "rgba(79,195,247,.06)", border: "1px solid rgba(79,195,247,.25)", borderRadius: 14, padding: "1rem 1.2rem", marginBottom: "1.2rem" }}>
+          <div style={{ fontFamily: "monospace", fontSize: "2rem", fontWeight: 900, letterSpacing: ".3em", color: "#4fc3f7", userSelect: "all" }}>{code}</div>
+        </div>
+        <div style={{ display: "flex", gap: ".7rem" }}>
+          <button onClick={copy} style={{ flex: 1, background: copied ? "rgba(165,214,167,.1)" : "rgba(79,195,247,.1)", border: `1px solid ${copied ? "rgba(165,214,167,.3)" : "rgba(79,195,247,.3)"}`, color: copied ? "#a5d6a7" : "#4fc3f7", borderRadius: 10, padding: ".7rem", fontFamily: "inherit", fontSize: ".85rem", fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: ".4rem" }}>
+            {copied ? <><CheckCircle size={14} /> Copied!</> : <><Copy size={14} /> Copy</>}
+          </button>
+          <button onClick={onClose} style={{ flex: 1, background: "rgba(255,255,255,.04)", border: "1px solid rgba(255,255,255,.08)", color: "#78909c", borderRadius: 10, padding: ".7rem", fontFamily: "inherit", fontSize: ".85rem", fontWeight: 700, cursor: "pointer" }}>Close</button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    setError(""); setLoading(true);
-    try {
-      const res = await adminApi.verifyKey(key);
-      if (res.valid) {
-        localStorage.setItem("admin_key", key);
-        onAuth();
-      } else {
-        throw new Error("Invalid admin key");
-      }
-    } catch {
-      // For demo — accept any non-empty key
-      if (key.trim().length >= 4) {
-        localStorage.setItem("admin_key", key);
-        onAuth();
-      } else {
-        setError("Invalid admin key. Please try again.");
-      }
-    } finally { setLoading(false); }
+// ── Add Bot Modal ──────────────────────────────────────────────────────────────
+function AddBotModal({ onClose, onAdd }: { onClose: () => void; onAdd: (d: { botName: string; phoneNumber: string; avatarData?: string }) => Promise<void> }) {
+  const [botName, setBotName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [avatar, setAvatar] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    if (f.size > 3 * 1024 * 1024) { setError("Image must be under 3MB"); return; }
+    setAvatar(await fileToBase64(f));
   }
 
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const cleanPhone = phone.trim().replace(/[\s+\-()]/g, "");
+    if (!botName.trim()) { setError("Bot name is required"); return; }
+    if (!cleanPhone || cleanPhone.length < 10) { setError("Enter a valid phone number with country code"); return; }
+    setLoading(true); setError("");
+    try { await onAdd({ botName: botName.trim(), phoneNumber: cleanPhone, avatarData: avatar || undefined }); onClose(); }
+    catch (err: unknown) { setError(err instanceof Error ? err.message : "Failed to add bot"); }
+    finally { setLoading(false); }
+  }
+
+  const inp = { width: "100%", padding: ".78rem 1rem", background: "rgba(255,255,255,.04)", border: "1px solid rgba(255,255,255,.08)", borderRadius: 12, color: "#e2e8f0", fontSize: ".9rem", fontFamily: "inherit", outline: "none" };
+
   return (
-    <div className="login-screen">
-      <div className="glass-card login-card">
-        <div className="login-header">
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "10px", marginBottom: "8px" }}>
-            <div className="mgr-logo-icon">🔐</div>
-            <div>
-              <div className="mgr-logo">KonoBot</div>
-              <div className="mgr-logo-sub">Admin Control Panel</div>
-            </div>
-          </div>
-          <p style={{ color: "var(--text-muted)", fontSize: "0.82rem", marginTop: "8px" }}>Enter your admin key to access the manager</p>
+    <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,.75)", display: "flex", alignItems: "center", justifyContent: "center", padding: "1rem", backdropFilter: "blur(8px)" }}>
+      <div style={{ background: "#0d1117", border: "1px solid rgba(99,102,241,.2)", borderRadius: 22, padding: "1.8rem", maxWidth: 420, width: "100%" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.4rem" }}>
+          <h3 style={{ color: "#e2e8f0", fontWeight: 800, fontSize: "1.05rem" }}>Add New Bot</h3>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: "#475569", cursor: "pointer", padding: "4px" }}><X size={18} /></button>
         </div>
-        {error && <div className="alert alert-error" style={{ marginBottom: "16px" }}>{error}</div>}
-        <form onSubmit={submit}>
-          <div className="form-group">
-            <label className="form-label">Admin Key</label>
-            <input className="form-input" type="password" placeholder="Enter admin key..." value={key}
-              onChange={e => setKey(e.target.value)} required />
+        <div style={{ display: "flex", justifyContent: "center", marginBottom: "1.4rem" }}>
+          <div style={{ position: "relative" }}>
+            <div onClick={() => fileRef.current?.click()} style={{ width: 80, height: 80, borderRadius: "50%", background: avatar ? "transparent" : "rgba(99,102,241,.1)", border: `2px dashed ${avatar ? "rgba(99,102,241,.5)" : "rgba(99,102,241,.3)"}`, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", overflow: "hidden" }}>
+              {avatar ? <img src={avatar} style={{ width: "100%", height: "100%", objectFit: "cover" }} alt="avatar" /> : <Upload size={22} style={{ color: "#6366f1" }} />}
+            </div>
+            {avatar && <button onClick={() => setAvatar(null)} style={{ position: "absolute", top: -4, right: -4, width: 20, height: 20, borderRadius: "50%", background: "#ef4444", border: "none", color: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}><X size={10} /></button>}
+            <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handleFile} />
           </div>
-          <button className="btn btn-cyan w-full" type="submit" disabled={loading} style={{ width: "100%", marginTop: "8px" }}>
-            {loading ? "Verifying..." : "🔑 Access Panel"}
-          </button>
+        </div>
+        {error && <div style={{ background: "rgba(239,68,68,.08)", border: "1px solid rgba(239,68,68,.25)", borderRadius: 10, padding: ".6rem .9rem", fontSize: ".78rem", color: "#fca5a5", marginBottom: ".9rem" }}>⚠️ {error}</div>}
+        <form onSubmit={handleSubmit}>
+          <div style={{ marginBottom: "1rem" }}>
+            <label style={{ display: "block", fontSize: ".7rem", fontWeight: 700, color: "#475569", marginBottom: ".38rem", textTransform: "uppercase", letterSpacing: ".06em" }}>Bot Name</label>
+            <input value={botName} onChange={e => setBotName(e.target.value)} placeholder="e.g. KonoBot Alpha" required style={inp} />
+          </div>
+          <div style={{ marginBottom: "1.4rem" }}>
+            <label style={{ display: "block", fontSize: ".7rem", fontWeight: 700, color: "#475569", marginBottom: ".38rem", textTransform: "uppercase", letterSpacing: ".06em" }}>WhatsApp Number</label>
+            <input value={phone} onChange={e => setPhone(e.target.value)} placeholder="2348012345678 (with country code)" required style={inp} />
+            <div style={{ fontSize: ".68rem", color: "#334155", marginTop: ".28rem" }}>No spaces, + or dashes — just numbers</div>
+          </div>
+          <div style={{ display: "flex", gap: ".7rem" }}>
+            <button type="button" onClick={onClose} style={{ flex: 1, background: "rgba(255,255,255,.04)", border: "1px solid rgba(255,255,255,.08)", color: "#64748b", borderRadius: 12, padding: ".78rem", fontFamily: "inherit", fontSize: ".88rem", fontWeight: 600, cursor: "pointer" }}>Cancel</button>
+            <button type="submit" disabled={loading} style={{ flex: 2, background: loading ? "rgba(99,102,241,.4)" : "linear-gradient(135deg,#6366f1,#4f46e5)", color: "#fff", border: "none", borderRadius: 12, padding: ".78rem", fontFamily: "inherit", fontSize: ".88rem", fontWeight: 700, cursor: loading ? "not-allowed" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: ".4rem", opacity: loading ? .7 : 1 }}>
+              {loading ? <><Loader2 size={14} style={{ animation: "spin .7s linear infinite" }} /> Adding…</> : <><Plus size={14} /> Add Bot</>}
+            </button>
+          </div>
         </form>
       </div>
     </div>
   );
 }
 
-// ─── DASHBOARD TAB ────────────────────────────────────────────────────────────
-function DashboardTab({ stats }: { stats: AdminStats }) {
+// ── Bot Card ───────────────────────────────────────────────────────────────────
+function BotCard({ bot, adminPw, onRefresh, onToast }: { bot: BotData; adminPw: string; onRefresh: () => void; onToast: (msg: string, type: "success" | "error" | "info") => void }) {
+  const [pairingCode, setPairingCode] = useState<string | null>(null);
+  const [loadingCode, setLoadingCode] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [restarting, setRestarting] = useState(false);
+  const [confirm, setConfirm] = useState(false);
+
+  const botId     = bot.botId || bot._id || "";
+  const connected = bot.isConnected || bot.status === "connected";
+  const displayName = bot.botName || bot.name || "Unknown Bot";
+  const displayPhone = bot.phoneNumber || bot.phone || bot.jid?.split("@")[0] || "—";
+
+  async function getPairingCode() {
+    setLoadingCode(true);
+    try { const d = await apiGetPairingCode(adminPw, botId); setPairingCode(d.pairingCode || d.code); }
+    catch (e: unknown) { onToast(e instanceof Error ? e.message : "Failed to get pairing code", "error"); }
+    finally { setLoadingCode(false); }
+  }
+
+  async function doDelete() {
+    setDeleting(true);
+    try { await apiDeleteBot(adminPw, botId); onToast(`Bot "${displayName}" deleted`, "success"); onRefresh(); }
+    catch (e: unknown) { onToast(e instanceof Error ? e.message : "Failed to delete bot", "error"); }
+    finally { setDeleting(false); setConfirm(false); }
+  }
+
+  async function restartBot() {
+    setRestarting(true);
+    try { await apiRestartBot(adminPw, botId); onToast(`Bot "${displayName}" restarting…`, "info"); setTimeout(onRefresh, 3000); }
+    catch (e: unknown) { onToast(e instanceof Error ? e.message : "Failed to restart", "error"); }
+    finally { setRestarting(false); }
+  }
+
+  const btnBase = { borderRadius: 10, padding: ".6rem .5rem", fontFamily: "inherit", fontSize: ".75rem", fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: ".35rem", transition: "all .2s" } as const;
+
   return (
     <>
-      <div className="stats-row">
-        {[
-          { icon: "🤖", cls: "stat-icon-cyan", label: "Total Bots", value: stats.totalBots, sub: `${stats.activeBots} active` },
-          { icon: "👥", cls: "stat-icon-gold", label: "Total Users", value: fmtNum(stats.totalUsers), sub: `${stats.premiumUsers} premium` },
-          { icon: "💬", cls: "stat-icon-purple", label: "Messages", value: fmtNum(stats.messagesHandled), sub: "all time" },
-          { icon: "🌐", cls: "stat-icon-green", label: "Groups", value: fmtNum(stats.totalGroups), sub: "across all bots" },
-          { icon: "⚠️", cls: "stat-icon-red", label: "Duplicates", value: stats.duplicatesFound, sub: "need review" },
-          { icon: "✅", cls: "stat-icon-cyan", label: "Uptime", value: stats.uptime, sub: "last 30 days" },
-        ].map(s => (
-          <div key={s.label} className="glass-card stat-card">
-            <div className={`stat-icon ${s.cls}`}>{s.icon}</div>
+      {confirm && <ConfirmDialog title={`Delete "${displayName}"?`} message="This permanently removes the bot and its session. It cannot be undone." confirmLabel="Delete" danger onConfirm={doDelete} onCancel={() => setConfirm(false)} />}
+      {pairingCode && <PairingModal code={pairingCode} onClose={() => setPairingCode(null)} />}
+      <div style={{ background: "rgba(255,255,255,.03)", border: `1px solid ${connected ? "rgba(99,102,241,.2)" : "rgba(255,255,255,.06)"}`, borderRadius: 20, padding: "1.3rem", display: "flex", flexDirection: "column", gap: "1rem", position: "relative", overflow: "hidden" }}>
+        <div style={{ position: "absolute", top: 0, right: 0, width: 100, height: 100, borderRadius: "0 20px 0 100%", background: connected ? "rgba(99,102,241,.04)" : "rgba(255,255,255,.01)", pointerEvents: "none" }} />
+        <div style={{ display: "flex", alignItems: "flex-start", gap: ".9rem" }}>
+          <div style={{ position: "relative", flexShrink: 0 }}>
+            {bot.avatarData
+              ? <img src={bot.avatarData} style={{ width: 52, height: 52, borderRadius: 14, objectFit: "cover", border: "2px solid rgba(99,102,241,.35)" }} alt={displayName} />
+              : <div style={{ width: 52, height: 52, borderRadius: 14, background: "linear-gradient(135deg,rgba(99,102,241,.2),rgba(79,195,247,.15))", display: "flex", alignItems: "center", justifyContent: "center", border: "2px solid rgba(99,102,241,.25)" }}><Bot size={22} style={{ color: "#6366f1" }} /></div>}
+            <div style={{ position: "absolute", bottom: -3, right: -3, width: 14, height: 14, borderRadius: "50%", background: connected ? "#22c55e" : "#475569", border: "2px solid #0d1117", boxShadow: connected ? "0 0 6px rgba(34,197,94,.6)" : "none" }} />
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontWeight: 800, fontSize: "1rem", color: "#e2e8f0", marginBottom: ".18rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{displayName}</div>
+            <div style={{ fontSize: ".72rem", color: "#475569", fontFamily: "monospace" }}>{displayPhone}</div>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: ".35rem", background: connected ? "rgba(34,197,94,.08)" : "rgba(71,85,105,.15)", border: `1px solid ${connected ? "rgba(34,197,94,.25)" : "rgba(71,85,105,.3)"}`, borderRadius: 50, padding: ".22rem .65rem", flexShrink: 0 }}>
+            {connected ? <Wifi size={11} style={{ color: "#22c55e" }} /> : <WifiOff size={11} style={{ color: "#475569" }} />}
+            <span style={{ fontSize: ".62rem", fontWeight: 700, color: connected ? "#22c55e" : "#475569" }}>{connected ? "Online" : (bot.status || "Offline")}</span>
+          </div>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: ".55rem" }}>
+          <button onClick={getPairingCode} disabled={loadingCode} style={{ ...btnBase, background: "rgba(99,102,241,.08)", border: "1px solid rgba(99,102,241,.25)", color: "#818cf8", opacity: loadingCode ? .6 : 1, cursor: loadingCode ? "not-allowed" : "pointer" }}>
+            {loadingCode ? <Loader2 size={12} style={{ animation: "spin .7s linear infinite" }} /> : <Key size={12} />} Pairing Code
+          </button>
+          <button onClick={restartBot} disabled={restarting} style={{ ...btnBase, background: "rgba(251,191,36,.06)", border: "1px solid rgba(251,191,36,.22)", color: "#fbbf24", opacity: restarting ? .6 : 1, cursor: restarting ? "not-allowed" : "pointer" }}>
+            {restarting ? <Loader2 size={12} style={{ animation: "spin .7s linear infinite" }} /> : <RotateCcw size={12} />} Restart
+          </button>
+          <button onClick={() => setConfirm(true)} disabled={deleting} style={{ ...btnBase, gridColumn: "span 2", background: "rgba(239,68,68,.06)", border: "1px solid rgba(239,68,68,.2)", color: "#f87171", opacity: deleting ? .6 : 1, cursor: deleting ? "not-allowed" : "pointer" }}>
+            {deleting ? <Loader2 size={12} style={{ animation: "spin .7s linear infinite" }} /> : <Trash2 size={12} />} Delete Bot
+          </button>
+        </div>
+        {bot.lastSeen && !connected && (
+          <div style={{ fontSize: ".65rem", color: "#334155", display: "flex", alignItems: "center", gap: ".3rem" }}>
+            <AlertCircle size={10} style={{ color: "#475569" }} /> Last seen: {new Date(bot.lastSeen).toLocaleString()}
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+// ── Edit User Modal ────────────────────────────────────────────────────────────
+function EditUserModal({ user, adminPw, onClose, onSave, onToast }: {
+  user: UserRecord; adminPw: string; onClose: () => void;
+  onSave: (u: UserRecord) => void; onToast: (msg: string, type: "success" | "error" | "info") => void;
+}) {
+  const [wallet, setWallet] = useState(String(user.wallet ?? 0));
+  const [bank,   setBank]   = useState(String(user.bank   ?? 0));
+  const [level,  setLevel]  = useState(String(user.level  ?? 1));
+  const [xp,     setXp]     = useState(String(user.xp     ?? 0));
+  const [streak, setStreak] = useState(String(user.streak ?? 0));
+  const [saving, setSaving] = useState(false);
+
+  async function handleSave(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      const result = await apiEditUser(adminPw, {
+        phone:  user.phone,
+        wallet: Number(wallet), bank: Number(bank),
+        level:  Number(level),  xp:   Number(xp), streak: Number(streak),
+      });
+      onSave(result.user || { ...user, wallet: Number(wallet), bank: Number(bank), level: Number(level), xp: Number(xp), streak: Number(streak) });
+      onToast("User updated", "success");
+      onClose();
+    } catch (err: unknown) {
+      onToast(err instanceof Error ? err.message : "Failed to update", "error");
+    } finally { setSaving(false); }
+  }
+
+  const inp = { width: "100%", padding: ".65rem .85rem", background: "rgba(255,255,255,.04)", border: "1px solid rgba(255,255,255,.08)", borderRadius: 10, color: "#e2e8f0", fontSize: ".88rem", fontFamily: "inherit", outline: "none" };
+  const lbl = { display: "block", fontSize: ".68rem", fontWeight: 700, color: "#475569", marginBottom: ".3rem", textTransform: "uppercase" as const, letterSpacing: ".06em" };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 1500, background: "rgba(0,0,0,.75)", display: "flex", alignItems: "center", justifyContent: "center", padding: "1rem", backdropFilter: "blur(8px)" }}>
+      <div style={{ background: "#0d1117", border: "1px solid rgba(99,102,241,.2)", borderRadius: 20, padding: "1.8rem", maxWidth: 420, width: "100%" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.2rem" }}>
+          <div>
+            <div style={{ fontWeight: 800, color: "#e2e8f0", fontSize: "1rem" }}>Edit User</div>
+            <div style={{ fontSize: ".72rem", color: "#475569", fontFamily: "monospace" }}>{user.phone}</div>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: "#475569", cursor: "pointer", padding: "4px" }}><X size={18} /></button>
+        </div>
+        <form onSubmit={handleSave}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: ".85rem", marginBottom: "1.2rem" }}>
+            {[["Wallet ($)", wallet, setWallet], ["Bank ($)", bank, setBank], ["Level", level, setLevel], ["XP", xp, setXp], ["Streak (days)", streak, setStreak]].map(([label, val, setter]) => (
+              <div key={label as string}>
+                <label style={lbl}>{label as string}</label>
+                <input type="number" min={0} value={val as string} onChange={e => (setter as (v: string) => void)(e.target.value)} style={inp} />
+              </div>
+            ))}
+          </div>
+          <div style={{ display: "flex", gap: ".7rem" }}>
+            <button type="button" onClick={onClose} style={{ flex: 1, background: "rgba(255,255,255,.04)", border: "1px solid rgba(255,255,255,.08)", color: "#64748b", borderRadius: 10, padding: ".72rem", fontFamily: "inherit", fontSize: ".85rem", fontWeight: 600, cursor: "pointer" }}>Cancel</button>
+            <button type="submit" disabled={saving} style={{ flex: 2, background: saving ? "rgba(99,102,241,.4)" : "linear-gradient(135deg,#6366f1,#4f46e5)", color: "#fff", border: "none", borderRadius: 10, padding: ".72rem", fontFamily: "inherit", fontSize: ".85rem", fontWeight: 700, cursor: saving ? "not-allowed" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: ".4rem" }}>
+              {saving ? <><Loader2 size={14} style={{ animation: "spin .7s linear infinite" }} /> Saving…</> : "Save Changes"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ── Users Tab ──────────────────────────────────────────────────────────────────
+function UsersTab({ adminPw, onToast }: { adminPw: string; onToast: (msg: string, type: "success" | "error" | "info") => void }) {
+  const [users, setUsers] = useState<UserRecord[]>([]);
+  const [total, setTotal]     = useState(0);
+  const [page,  setPage]      = useState(1);
+  const [pages, setPages]     = useState(1);
+  const [search, setSearch]   = useState("");
+  const [loading, setLoading] = useState(false);
+  const [editUser, setEditUser] = useState<UserRecord | null>(null);
+  const [confirm, setConfirm]   = useState<{ type: string; user?: UserRecord } | null>(null);
+  const [mergeSource, setMergeSource] = useState("");
+  const [mergeTarget, setMergeTarget] = useState("");
+  const [showMerge, setShowMerge]     = useState(false);
+  const LIMIT = 20;
+
+  const load = useCallback(async (p = 1, q = search) => {
+    setLoading(true);
+    try {
+      const d = await apiFetchUsers(adminPw, p, LIMIT, q);
+      setUsers(d.users || []);
+      setTotal(d.total || 0);
+      setPage(d.page || p);
+      setPages(d.pages || 1);
+    } catch (e: unknown) { onToast(e instanceof Error ? e.message : "Failed to load users", "error"); }
+    finally { setLoading(false); }
+  }, [adminPw, search, onToast]);
+
+  useEffect(() => { load(1); }, []);
+
+  async function handleBan(user: UserRecord, ban: boolean) {
+    try {
+      await apiBanUser(adminPw, user.phone, ban);
+      onToast(`User ${user.phone} ${ban ? "banned" : "unbanned"}`, "success");
+      load(page);
+    } catch (e: unknown) { onToast(e instanceof Error ? e.message : "Failed", "error"); }
+    setConfirm(null);
+  }
+
+  async function handleResetCooldowns(user: UserRecord) {
+    try { await apiResetUserCooldowns(adminPw, user.phone); onToast("Cooldowns reset", "success"); }
+    catch (e: unknown) { onToast(e instanceof Error ? e.message : "Failed", "error"); }
+    setConfirm(null);
+  }
+
+  async function handleReset(user: UserRecord) {
+    try { await apiResetUser(adminPw, user.phone); onToast(`Stats reset for ${user.phone}`, "success"); load(page); }
+    catch (e: unknown) { onToast(e instanceof Error ? e.message : "Failed", "error"); }
+    setConfirm(null);
+  }
+
+  async function handleDelete(user: UserRecord) {
+    try { await apiDeleteUser(adminPw, user.phone); onToast(`User ${user.phone} deleted`, "success"); load(page); }
+    catch (e: unknown) { onToast(e instanceof Error ? e.message : "Failed", "error"); }
+    setConfirm(null);
+  }
+
+  async function handleDeleteAll() {
+    try { const d = await apiDeleteAllUsers(adminPw); onToast(d.message || "All users deleted", "success"); load(1); }
+    catch (e: unknown) { onToast(e instanceof Error ? e.message : "Failed", "error"); }
+    setConfirm(null);
+  }
+
+  async function handleMerge() {
+    if (!mergeSource || !mergeTarget) { onToast("Enter both phone numbers", "error"); return; }
+    try {
+      const d = await apiMergeUsers(adminPw, mergeSource, mergeTarget);
+      onToast(d.message || "Merged", "success");
+      setShowMerge(false); setMergeSource(""); setMergeTarget(""); load(1);
+    } catch (e: unknown) { onToast(e instanceof Error ? e.message : "Failed", "error"); }
+  }
+
+  function doSearch(e: React.FormEvent) { e.preventDefault(); load(1, search); }
+
+  const rowStyle = { display: "grid", gridTemplateColumns: "1.2fr 1fr 0.8fr 0.8fr 0.8fr 0.7fr auto", gap: ".5rem", alignItems: "center", padding: ".65rem .85rem", borderBottom: "1px solid rgba(255,255,255,.04)", fontSize: ".78rem" };
+
+  return (
+    <div>
+      {editUser && <EditUserModal user={editUser} adminPw={adminPw} onClose={() => setEditUser(null)} onSave={u => { setUsers(prev => prev.map(x => x.phone === u.phone ? u : x)); }} onToast={onToast} />}
+
+      {confirm?.type === "ban"    && <ConfirmDialog title="Ban User?" message={`Ban ${confirm.user?.phone}? They cannot use bot commands.`} confirmLabel="Ban" danger onConfirm={() => handleBan(confirm.user!, true)} onCancel={() => setConfirm(null)} />}
+      {confirm?.type === "unban"  && <ConfirmDialog title="Unban User?" message={`Restore access for ${confirm.user?.phone}?`} confirmLabel="Unban" onConfirm={() => handleBan(confirm.user!, false)} onCancel={() => setConfirm(null)} />}
+      {confirm?.type === "cooldowns" && <ConfirmDialog title="Reset Cooldowns?" message={`Clear all active cooldowns for ${confirm.user?.phone}?`} confirmLabel="Reset" onConfirm={() => handleResetCooldowns(confirm.user!)} onCancel={() => setConfirm(null)} />}
+      {confirm?.type === "reset"  && <ConfirmDialog title="Reset User Stats?" message={`This wipes all economy, XP, inventory, and game data for ${confirm.user?.phone}. This cannot be undone.`} confirmLabel="Reset Stats" danger onConfirm={() => handleReset(confirm.user!)} onCancel={() => setConfirm(null)} />}
+      {confirm?.type === "delete" && <ConfirmDialog title="Delete User?" message={`Permanently delete ${confirm.user?.phone} and ALL their data? This cannot be undone.`} confirmLabel="Delete Forever" danger onConfirm={() => handleDelete(confirm.user!)} onCancel={() => setConfirm(null)} />}
+      {confirm?.type === "deleteAll" && <ConfirmDialog title="Delete ALL Users?" message="This wipes every single user record from the database. This is IRREVERSIBLE." confirmLabel="Delete All" danger onConfirm={handleDeleteAll} onCancel={() => setConfirm(null)} />}
+
+      {showMerge && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 1500, background: "rgba(0,0,0,.75)", display: "flex", alignItems: "center", justifyContent: "center", padding: "1rem", backdropFilter: "blur(8px)" }}>
+          <div style={{ background: "#0d1117", border: "1px solid rgba(99,102,241,.2)", borderRadius: 20, padding: "1.8rem", maxWidth: 400, width: "100%" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.2rem" }}>
+              <div style={{ fontWeight: 800, color: "#e2e8f0" }}>Merge Duplicate Users</div>
+              <button onClick={() => setShowMerge(false)} style={{ background: "none", border: "none", color: "#475569", cursor: "pointer", padding: "4px" }}><X size={18} /></button>
+            </div>
+            <div style={{ color: "#475569", fontSize: ".8rem", lineHeight: 1.6, marginBottom: "1.2rem" }}>Source account is deleted after merging. Balances, XP, inventory and achievements are combined into the target account.</div>
+            {[["Source Phone (to delete)", mergeSource, setMergeSource], ["Target Phone (to keep)", mergeTarget, setMergeTarget]].map(([label, val, setter]) => (
+              <div key={label as string} style={{ marginBottom: ".9rem" }}>
+                <label style={{ display: "block", fontSize: ".68rem", fontWeight: 700, color: "#475569", marginBottom: ".3rem", textTransform: "uppercase" as const }}>{label as string}</label>
+                <input value={val as string} onChange={e => (setter as (v: string) => void)(e.target.value)} placeholder="e.g. 2348012345678" style={{ width: "100%", padding: ".7rem .9rem", background: "rgba(255,255,255,.04)", border: "1px solid rgba(255,255,255,.08)", borderRadius: 10, color: "#e2e8f0", fontSize: ".88rem", fontFamily: "inherit", outline: "none" }} />
+              </div>
+            ))}
+            <div style={{ display: "flex", gap: ".7rem", marginTop: ".5rem" }}>
+              <button onClick={() => setShowMerge(false)} style={{ flex: 1, background: "rgba(255,255,255,.04)", border: "1px solid rgba(255,255,255,.08)", color: "#64748b", borderRadius: 10, padding: ".72rem", fontFamily: "inherit", fontSize: ".85rem", fontWeight: 600, cursor: "pointer" }}>Cancel</button>
+              <button onClick={handleMerge} style={{ flex: 2, background: "linear-gradient(135deg,#f59e0b,#d97706)", color: "#000", border: "none", borderRadius: 10, padding: ".72rem", fontFamily: "inherit", fontSize: ".85rem", fontWeight: 700, cursor: "pointer" }}>Merge Accounts</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Toolbar */}
+      <div style={{ display: "flex", gap: ".7rem", marginBottom: "1.2rem", flexWrap: "wrap", alignItems: "center" }}>
+        <form onSubmit={doSearch} style={{ display: "flex", gap: ".5rem", flex: 1, minWidth: 200 }}>
+          <div style={{ position: "relative", flex: 1 }}>
+            <Search size={14} style={{ position: "absolute", left: ".75rem", top: "50%", transform: "translateY(-50%)", color: "#475569", pointerEvents: "none" }} />
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by phone number…" style={{ width: "100%", padding: ".65rem .85rem .65rem 2.2rem", background: "rgba(255,255,255,.04)", border: "1px solid rgba(255,255,255,.08)", borderRadius: 10, color: "#e2e8f0", fontSize: ".85rem", fontFamily: "inherit", outline: "none" }} />
+          </div>
+          <button type="submit" style={{ background: "rgba(99,102,241,.15)", border: "1px solid rgba(99,102,241,.3)", color: "#818cf8", borderRadius: 10, padding: ".65rem 1rem", fontFamily: "inherit", fontSize: ".82rem", fontWeight: 700, cursor: "pointer" }}>Search</button>
+        </form>
+        <button onClick={() => load(page)} style={{ background: "rgba(255,255,255,.04)", border: "1px solid rgba(255,255,255,.08)", color: "#475569", borderRadius: 10, padding: ".65rem", cursor: "pointer", display: "flex", alignItems: "center" }}>
+          <RefreshCw size={14} style={loading ? { animation: "spin .7s linear infinite", color: "#6366f1" } : {}} />
+        </button>
+        <button onClick={() => setShowMerge(true)} style={{ background: "rgba(245,158,11,.08)", border: "1px solid rgba(245,158,11,.22)", color: "#fbbf24", borderRadius: 10, padding: ".65rem .9rem", fontFamily: "inherit", fontSize: ".78rem", fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: ".35rem" }}>
+          <Users size={13} /> Merge
+        </button>
+        <button onClick={() => setConfirm({ type: "deleteAll" })} style={{ background: "rgba(239,68,68,.06)", border: "1px solid rgba(239,68,68,.2)", color: "#f87171", borderRadius: 10, padding: ".65rem .9rem", fontFamily: "inherit", fontSize: ".78rem", fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: ".35rem" }}>
+          <Trash2 size={13} /> Delete All
+        </button>
+      </div>
+
+      <div style={{ color: "#334155", fontSize: ".75rem", marginBottom: ".7rem" }}>{total} user{total !== 1 ? "s" : ""} total</div>
+
+      {/* Table */}
+      <div style={{ background: "rgba(255,255,255,.02)", border: "1px solid rgba(255,255,255,.06)", borderRadius: 16, overflow: "hidden" }}>
+        {/* Header */}
+        <div style={{ ...rowStyle, background: "rgba(255,255,255,.03)", fontSize: ".68rem", color: "#334155", fontWeight: 700, textTransform: "uppercase", letterSpacing: ".05em", borderBottom: "1px solid rgba(255,255,255,.07)" }}>
+          <span>User</span><span>Balance</span><span>Level</span><span>XP</span><span>Streak</span><span>Status</span><span>Actions</span>
+        </div>
+
+        {loading ? (
+          <div style={{ display: "flex", justifyContent: "center", alignItems: "center", padding: "3rem", gap: ".7rem", color: "#334155" }}>
+            <Loader2 size={24} style={{ animation: "spin .8s linear infinite", color: "#6366f1" }} />
+            <span style={{ fontSize: ".88rem" }}>Loading users…</span>
+          </div>
+        ) : users.length === 0 ? (
+          <div style={{ textAlign: "center", padding: "3rem 1rem", color: "#334155", fontSize: ".85rem" }}>No users found</div>
+        ) : users.map((u, i) => (
+          <div key={u.phone || i} style={{ ...rowStyle, background: i % 2 === 0 ? "transparent" : "rgba(255,255,255,.01)" }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontWeight: 700, color: "#e2e8f0", fontSize: ".8rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{u.username || u.name || "—"}</div>
+              <div style={{ fontSize: ".65rem", color: "#475569", fontFamily: "monospace" }}>{u.phone}</div>
+              {u.guild && <div style={{ fontSize: ".62rem", color: "#6366f1", marginTop: ".1rem" }}>🏰 {u.guild}</div>}
+            </div>
             <div>
-              <div className="stat-label">{s.label}</div>
-              <div className="stat-value">{s.value}</div>
-              <div className="stat-sub">{s.sub}</div>
+              <div style={{ color: "#4fc3f7", fontWeight: 700, fontSize: ".78rem" }}>{formatMoney(u.totalBalance || 0)}</div>
+              <div style={{ fontSize: ".62rem", color: "#475569" }}>W:{formatMoney(u.wallet || 0)} B:{formatMoney(u.bank || 0)}</div>
+            </div>
+            <div style={{ color: "#a78bfa", fontWeight: 700 }}>Lv.{u.level || 1}</div>
+            <div style={{ color: "#94a3b8" }}>{(u.xp || 0).toLocaleString()}</div>
+            <div style={{ color: "#fbbf24" }}>{u.streak || 0}d 🔥</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: ".25rem" }}>
+              {u.banned && <span style={{ background: "rgba(239,68,68,.12)", border: "1px solid rgba(239,68,68,.3)", color: "#f87171", borderRadius: 6, padding: ".12rem .4rem", fontSize: ".6rem", fontWeight: 700 }}>BANNED</span>}
+              {!u.registered && <span style={{ background: "rgba(245,158,11,.1)", border: "1px solid rgba(245,158,11,.25)", color: "#fbbf24", borderRadius: 6, padding: ".12rem .4rem", fontSize: ".6rem", fontWeight: 700 }}>UNREG</span>}
+              {u.registered && !u.banned && <span style={{ background: "rgba(34,197,94,.08)", border: "1px solid rgba(34,197,94,.22)", color: "#22c55e", borderRadius: 6, padding: ".12rem .4rem", fontSize: ".6rem", fontWeight: 700 }}>ACTIVE</span>}
+            </div>
+            <div style={{ display: "flex", gap: ".3rem", flexWrap: "wrap" }}>
+              {[
+                { icon: <Edit2 size={11} />, color: "#818cf8", bg: "rgba(99,102,241,.1)", border: "rgba(99,102,241,.25)", title: "Edit", onClick: () => setEditUser(u) },
+                { icon: <Ban size={11} />, color: u.banned ? "#22c55e" : "#f87171", bg: u.banned ? "rgba(34,197,94,.08)" : "rgba(239,68,68,.08)", border: u.banned ? "rgba(34,197,94,.25)" : "rgba(239,68,68,.2)", title: u.banned ? "Unban" : "Ban", onClick: () => setConfirm({ type: u.banned ? "unban" : "ban", user: u }) },
+                { icon: <Zap size={11} />, color: "#fbbf24", bg: "rgba(245,158,11,.08)", border: "rgba(245,158,11,.22)", title: "Reset Cooldowns", onClick: () => setConfirm({ type: "cooldowns", user: u }) },
+                { icon: <Shield size={11} />, color: "#fb923c", bg: "rgba(251,146,60,.08)", border: "rgba(251,146,60,.22)", title: "Reset Stats", onClick: () => setConfirm({ type: "reset", user: u }) },
+                { icon: <Trash2 size={11} />, color: "#f87171", bg: "rgba(239,68,68,.06)", border: "rgba(239,68,68,.18)", title: "Delete User", onClick: () => setConfirm({ type: "delete", user: u }) },
+              ].map(btn => (
+                <button key={btn.title} title={btn.title} onClick={btn.onClick} style={{ background: btn.bg, border: `1px solid ${btn.border}`, color: btn.color, borderRadius: 7, padding: ".32rem", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", minWidth: 26, minHeight: 26 }}>
+                  {btn.icon}
+                </button>
+              ))}
             </div>
           </div>
         ))}
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
-        <div className="glass-card">
-          <div className="card-header">
-            <span className="card-title">🤖 Bot Status Overview</span>
-          </div>
-          <div className="card-body">
-            {[
-              { label: "Active", count: stats.activeBots, color: "var(--green)", pct: (stats.activeBots / stats.totalBots) * 100 },
-              { label: "Inactive", count: stats.totalBots - stats.activeBots - 2, color: "var(--text-muted)", pct: ((stats.totalBots - stats.activeBots - 2) / stats.totalBots) * 100 },
-              { label: "Error / Connecting", count: 2, color: "var(--red-accent)", pct: (2 / stats.totalBots) * 100 },
-            ].map(r => (
-              <div key={r.label} style={{ marginBottom: "14px" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "5px" }}>
-                  <span style={{ fontSize: "0.8rem", color: "var(--text-secondary)" }}>{r.label}</span>
-                  <span style={{ fontSize: "0.8rem", fontWeight: 600, color: "#fff" }}>{r.count}</span>
-                </div>
-                <div style={{ height: "6px", background: "rgba(255,255,255,0.06)", borderRadius: "3px", overflow: "hidden" }}>
-                  <div style={{ height: "100%", width: `${r.pct}%`, background: r.color, borderRadius: "3px", transition: "width 0.6s ease" }} />
-                </div>
-              </div>
-            ))}
-          </div>
+      {/* Pagination */}
+      {pages > 1 && (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: ".6rem", marginTop: "1.2rem" }}>
+          <button onClick={() => load(page - 1)} disabled={page <= 1} style={{ background: "rgba(255,255,255,.04)", border: "1px solid rgba(255,255,255,.08)", color: page <= 1 ? "#334155" : "#94a3b8", borderRadius: 9, padding: ".4rem .7rem", cursor: page <= 1 ? "not-allowed" : "pointer", display: "flex", alignItems: "center" }}>
+            <ChevronLeft size={15} />
+          </button>
+          <span style={{ color: "#475569", fontSize: ".8rem" }}>Page {page} of {pages}</span>
+          <button onClick={() => load(page + 1)} disabled={page >= pages} style={{ background: "rgba(255,255,255,.04)", border: "1px solid rgba(255,255,255,.08)", color: page >= pages ? "#334155" : "#94a3b8", borderRadius: 9, padding: ".4rem .7rem", cursor: page >= pages ? "not-allowed" : "pointer", display: "flex", alignItems: "center" }}>
+            <ChevronRight size={15} />
+          </button>
         </div>
-
-        <div className="glass-card">
-          <div className="card-header">
-            <span className="card-title">💎 Plan Distribution</span>
-          </div>
-          <div className="card-body">
-            {[
-              { label: "Enterprise", count: 8, color: "var(--gold)", pct: 8 },
-              { label: "Pro", count: 87, color: "var(--purple)", pct: 28 },
-              { label: "Basic", count: 217, color: "var(--cyan)", pct: 45 },
-              { label: "Free", count: 972, color: "var(--text-muted)", pct: 76 },
-            ].map(r => (
-              <div key={r.label} style={{ marginBottom: "14px" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "5px" }}>
-                  <span style={{ fontSize: "0.8rem", color: "var(--text-secondary)" }}>{r.label}</span>
-                  <span style={{ fontSize: "0.8rem", fontWeight: 600, color: "#fff" }}>{r.count}</span>
-                </div>
-                <div style={{ height: "6px", background: "rgba(255,255,255,0.06)", borderRadius: "3px", overflow: "hidden" }}>
-                  <div style={{ height: "100%", width: `${r.pct}%`, background: r.color, borderRadius: "3px" }} />
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    </>
+      )}
+    </div>
   );
 }
 
-// ─── BOTS TAB ─────────────────────────────────────────────────────────────────
-function BotsTab() {
-  const [bots, setBots] = useState<AdminBot[]>(MOCK_BOTS);
-  const [search, setSearch] = useState("");
-  const [confirm, setConfirm] = useState<{ msg: string; onOk: () => void } | null>(null);
+// ── Main Manager Component ─────────────────────────────────────────────────────
+export default function Manager() {
+  const [adminPw, setAdminPw]   = useState(() => localStorage.getItem("bm_pw") || "");
+  const [showPw, setShowPw]     = useState(false);
+  const [authed, setAuthed]     = useState(false);
+  const [bots, setBots]         = useState<BotData[]>([]);
+  const [loading, setLoading]   = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [authError, setAuthError] = useState("");
+  const [activeTab, setActiveTab] = useState<"bots" | "users">("bots");
+  const [toasts, setToasts]     = useState<{ id: number; msg: string; type: "success" | "error" | "info" }[]>([]);
 
-  const filtered = bots.filter(b =>
-    b.name.toLowerCase().includes(search.toLowerCase()) ||
-    b.number.includes(search) || b.owner.toLowerCase().includes(search.toLowerCase())
-  );
-
-  function handleDelete(id: string, name: string) {
-    setConfirm({ msg: `Delete bot "${name}"? This action cannot be undone.`, onOk: () => { setBots(p => p.filter(b => b.id !== id)); setConfirm(null); } });
+  function addToast(msg: string, type: "success" | "error" | "info" = "info") {
+    const id = Date.now();
+    setToasts(t => [...t, { id, msg, type }]);
   }
+  function removeToast(id: number) { setToasts(t => t.filter(x => x.id !== id)); }
 
-  function handleRestart(id: string) {
-    setBots(p => p.map(b => b.id === id ? { ...b, status: "connecting" as const } : b));
-    setTimeout(() => setBots(p => p.map(b => b.id === id ? { ...b, status: "active" as const } : b)), 2000);
-  }
-
-  return (
-    <>
-      {confirm && <Confirm msg={confirm.msg} onConfirm={confirm.onOk} onCancel={() => setConfirm(null)} />}
-      <div style={{ display: "flex", gap: "12px", marginBottom: "16px", flexWrap: "wrap" }}>
-        <div className="search-box" style={{ flex: 1, minWidth: "200px" }}>
-          <span className="search-icon">🔍</span>
-          <input className="form-input" placeholder="Search bots..." value={search} onChange={e => setSearch(e.target.value)} style={{ paddingLeft: "34px" }} />
-        </div>
-        <button className="btn btn-cyan btn-sm">+ Add Bot</button>
-      </div>
-      <div className="glass-card" style={{ padding: 0 }}>
-        <div className="table-wrapper">
-          <table>
-            <thead>
-              <tr>
-                <th>Bot Name</th>
-                <th>Number</th>
-                <th>Owner</th>
-                <th>Status</th>
-                <th>Groups</th>
-                <th>Messages</th>
-                <th>Last Seen</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map(bot => (
-                <tr key={bot.id}>
-                  <td className="td-bold">{bot.name}</td>
-                  <td className="td-mono">{bot.number}</td>
-                  <td>{bot.owner}</td>
-                  <td><StatusBadge status={bot.status} /></td>
-                  <td>{bot.groups}</td>
-                  <td>{fmtNum(bot.messagesHandled)}</td>
-                  <td style={{ color: "var(--text-muted)", fontSize: "0.78rem" }}>{bot.lastSeen}</td>
-                  <td>
-                    <div style={{ display: "flex", gap: "6px" }}>
-                      <button className="btn btn-outline btn-xs" onClick={() => handleRestart(bot.id)} title="Restart">↺</button>
-                      <button className="btn btn-danger btn-xs" onClick={() => handleDelete(bot.id, bot.name)} title="Delete">✕</button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </>
-  );
-}
-
-// ─── USERS TAB ─────────────────────────────────────────────────────────────────
-function UsersTab() {
-  const [users, setUsers] = useState<AdminUser[]>(MOCK_USERS);
-  const [search, setSearch] = useState("");
-  const [planFilter, setPlanFilter] = useState("all");
-  const [confirm, setConfirm] = useState<{ msg: string; onOk: () => void } | null>(null);
-
-  const filtered = users.filter(u =>
-    (planFilter === "all" || u.plan === planFilter) &&
-    (u.username.toLowerCase().includes(search.toLowerCase()) || u.email.toLowerCase().includes(search.toLowerCase()))
-  );
-
-  function toggleSuspend(id: string, current: string) {
-    const next = current === "active" ? "suspended" : "active";
-    setConfirm({
-      msg: `${next === "suspended" ? "Suspend" : "Reactivate"} this user account?`,
-      onOk: () => { setUsers(p => p.map(u => u.id === id ? { ...u, status: next as any } : u)); setConfirm(null); }
-    });
-  }
-
-  function handleDelete(id: string) {
-    setConfirm({ msg: "Permanently delete this user and all their data?", onOk: () => { setUsers(p => p.filter(u => u.id !== id)); setConfirm(null); } });
-  }
-
-  return (
-    <>
-      {confirm && <Confirm msg={confirm.msg} onConfirm={confirm.onOk} onCancel={() => setConfirm(null)} />}
-      <div style={{ display: "flex", gap: "12px", marginBottom: "16px", flexWrap: "wrap" }}>
-        <div className="search-box" style={{ flex: 1, minWidth: "200px" }}>
-          <span className="search-icon">🔍</span>
-          <input className="form-input" placeholder="Search users..." value={search} onChange={e => setSearch(e.target.value)} style={{ paddingLeft: "34px" }} />
-        </div>
-        <select className="form-select" style={{ width: "140px" }} value={planFilter} onChange={e => setPlanFilter(e.target.value)}>
-          <option value="all">All Plans</option>
-          <option value="free">Free</option>
-          <option value="basic">Basic</option>
-          <option value="pro">Pro</option>
-          <option value="enterprise">Enterprise</option>
-        </select>
-      </div>
-      <div className="glass-card" style={{ padding: 0 }}>
-        <div className="table-wrapper">
-          <table>
-            <thead>
-              <tr>
-                <th>Username</th>
-                <th>Email</th>
-                <th>Plan</th>
-                <th>Bots</th>
-                <th>Status</th>
-                <th>Joined</th>
-                <th>Last Login</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map(user => (
-                <tr key={user.id}>
-                  <td className="td-bold">{user.username}</td>
-                  <td style={{ fontSize: "0.8rem" }}>{user.email}</td>
-                  <td><StatusBadge status={user.plan} /></td>
-                  <td>{user.bots}</td>
-                  <td><StatusBadge status={user.status} /></td>
-                  <td style={{ color: "var(--text-muted)", fontSize: "0.78rem" }}>{user.joinedAt}</td>
-                  <td style={{ color: "var(--text-muted)", fontSize: "0.78rem" }}>{user.lastLogin}</td>
-                  <td>
-                    <div style={{ display: "flex", gap: "6px" }}>
-                      <button
-                        className={`btn btn-xs ${user.status === "active" ? "btn-ghost" : "btn-success"}`}
-                        onClick={() => toggleSuspend(user.id, user.status)}
-                      >
-                        {user.status === "active" ? "🚫" : "✅"}
-                      </button>
-                      <button className="btn btn-danger btn-xs" onClick={() => handleDelete(user.id)}>✕</button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </>
-  );
-}
-
-// ─── DUPLICATES TAB ────────────────────────────────────────────────────────────
-function DuplicatesTab() {
-  const [dupes, setDupes] = useState<Duplicate[]>(MOCK_DUPLICATES);
-  const [confirm, setConfirm] = useState<{ msg: string; onOk: () => void } | null>(null);
-
-  function handleDelete(id: string, number: string) {
-    setConfirm({
-      msg: `Remove duplicate record for ${number}? This will unlink the number from duplicate tracking.`,
-      onOk: () => { setDupes(p => p.filter(d => d.id !== id)); setConfirm(null); }
-    });
-  }
-
-  return (
-    <>
-      {confirm && <Confirm msg={confirm.msg} onConfirm={confirm.onOk} onCancel={() => setConfirm(null)} />}
-      <div className="alert alert-warning" style={{ marginBottom: "16px" }}>
-        ⚠️ {dupes.length} duplicate phone number{dupes.length !== 1 ? "s" : ""} detected across multiple groups. Review and remove as needed.
-      </div>
-      <div className="glass-card" style={{ padding: 0 }}>
-        <div className="table-wrapper">
-          <table>
-            <thead>
-              <tr>
-                <th>Phone Number</th>
-                <th>Occurrences</th>
-                <th>Groups Found In</th>
-                <th>First Seen</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {dupes.map(d => (
-                <tr key={d.id}>
-                  <td className="td-mono">{d.number}</td>
-                  <td><span className="badge badge-red">{d.occurrences}x</span></td>
-                  <td style={{ fontSize: "0.8rem", color: "var(--text-secondary)", maxWidth: "300px" }}>
-                    {d.groups.join(", ")}
-                  </td>
-                  <td style={{ color: "var(--text-muted)", fontSize: "0.78rem" }}>{d.firstSeen}</td>
-                  <td>
-                    <button className="btn btn-danger btn-xs" onClick={() => handleDelete(d.id, d.number)}>Remove</button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </>
-  );
-}
-
-// ─── MIGRATION TAB ─────────────────────────────────────────────────────────────
-function MigrationTab() {
-  const [json, setJson] = useState("");
-  const [result, setResult] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-
-  async function handleMigrate() {
-    if (!json.trim()) return;
-    setLoading(true); setResult(null);
+  const loadBots = useCallback(async (isRefresh = false) => {
+    if (!adminPw) return;
+    if (isRefresh) setRefreshing(true); else setLoading(true);
     try {
-      JSON.parse(json);
-      await new Promise(r => setTimeout(r, 800));
-      setResult("✅ Migration completed successfully. 12 records imported.");
-    } catch {
-      setResult("❌ Invalid JSON format. Please check your data.");
-    } finally { setLoading(false); }
+      const d = await apiFetchBots(adminPw);
+      setBots(Array.isArray(d) ? d : (d.bots || []));
+      setAuthed(true);
+      localStorage.setItem("bm_pw", adminPw);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Failed";
+      if (msg.toLowerCase().includes("unauthorized") || msg.includes("401") || msg.includes("403") || msg.includes("admin")) {
+        setAuthError("Incorrect admin password");
+        localStorage.removeItem("bm_pw");
+      } else {
+        addToast(msg, "error");
+      }
+    } finally { setLoading(false); setRefreshing(false); }
+  }, [adminPw]);
+
+  useEffect(() => {
+    const saved = localStorage.getItem("bm_pw");
+    if (saved) { setAdminPw(saved); }
+  }, []);
+
+  async function handleAuth(e: React.FormEvent) {
+    e.preventDefault();
+    setAuthError("");
+    await loadBots();
   }
 
-  return (
-    <>
-      <div className="alert alert-info" style={{ marginBottom: "16px" }}>
-        📦 Paste your bot/group data in JSON format below to migrate it into the platform.
-      </div>
-      <div className="glass-card" style={{ padding: "24px" }}>
-        <div className="form-group">
-          <label className="form-label">Migration Data (JSON)</label>
-          <textarea className="form-textarea" style={{ minHeight: "200px", fontFamily: "monospace", fontSize: "0.82rem" }}
-            placeholder={'[\n  { "number": "+62 812-xxxx", "groups": ["Group A", "Group B"] }\n]'}
-            value={json} onChange={e => setJson(e.target.value)} />
+  async function handleAddBot(data: { botName: string; phoneNumber: string; avatarData?: string }) {
+    await apiAddBot(adminPw, data);
+    addToast(`Bot "${data.botName}" added!`, "success");
+    await loadBots(true);
+  }
+
+  const onlineBots = bots.filter(b => b.isConnected || b.status === "connected").length;
+
+  // ── Login screen ────────────────────────────────────────────────────────────
+  if (!authed) {
+    return (
+      <div style={{ minHeight: "100vh", background: "#030712", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Inter', 'Poppins', sans-serif", padding: "1.5rem" }}>
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
+        <style>{`*,*::before,*::after{box-sizing:border-box} @keyframes spin{to{transform:rotate(360deg)}} @keyframes slideIn{from{opacity:0;transform:translateX(20px)} to{opacity:1;transform:translateX(0)}} @keyframes glow{0%,100%{box-shadow:0 0 20px rgba(99,102,241,.2)} 50%{box-shadow:0 0 40px rgba(99,102,241,.5)}}`}</style>
+        <div style={{ width: "100%", maxWidth: 380, textAlign: "center" }}>
+          <div style={{ width: 70, height: 70, borderRadius: 20, background: "linear-gradient(135deg,rgba(99,102,241,.2),rgba(79,195,247,.1))", border: "2px solid rgba(99,102,241,.35)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 1.5rem", animation: "glow 3s ease-in-out infinite" }}>
+            <Bot size={30} style={{ color: "#6366f1" }} />
+          </div>
+          <h1 style={{ color: "#e2e8f0", fontWeight: 900, fontSize: "1.6rem", marginBottom: ".3rem" }}>Bot Manager</h1>
+          <p style={{ color: "#334155", fontSize: ".85rem", marginBottom: "2rem" }}>Admin access required</p>
+          <form onSubmit={handleAuth}>
+            <div style={{ position: "relative", marginBottom: ".9rem" }}>
+              <Lock size={14} style={{ position: "absolute", left: ".9rem", top: "50%", transform: "translateY(-50%)", color: "#475569", pointerEvents: "none" }} />
+              <input type={showPw ? "text" : "password"} value={adminPw} onChange={e => { setAdminPw(e.target.value); setAuthError(""); }} placeholder="Admin password" style={{ width: "100%", padding: ".85rem 2.8rem .85rem 2.6rem", background: "rgba(255,255,255,.04)", border: `1px solid ${authError ? "rgba(239,68,68,.5)" : "rgba(255,255,255,.08)"}`, borderRadius: 14, color: "#e2e8f0", fontSize: ".92rem", fontFamily: "inherit", outline: "none" }} />
+              <button type="button" onClick={() => setShowPw(s => !s)} style={{ position: "absolute", right: ".9rem", top: "50%", transform: "translateY(-50%)", background: "none", border: "none", color: "#475569", cursor: "pointer", padding: "4px", display: "flex", alignItems: "center", justifyContent: "center", minWidth: 28, minHeight: 28 }}>
+                {showPw ? <EyeOff size={15} /> : <Eye size={15} />}
+              </button>
+            </div>
+            {authError && <div style={{ color: "#f87171", fontSize: ".78rem", marginBottom: ".8rem" }}>⚠️ {authError}</div>}
+            <button type="submit" disabled={loading || !adminPw} style={{ width: "100%", padding: ".9rem", background: loading ? "rgba(99,102,241,.4)" : "linear-gradient(135deg,#6366f1,#4f46e5)", color: "#fff", border: "none", borderRadius: 14, fontFamily: "inherit", fontSize: ".92rem", fontWeight: 700, cursor: (loading || !adminPw) ? "not-allowed" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: ".45rem", opacity: !adminPw ? .5 : 1, boxShadow: "0 8px 24px rgba(99,102,241,.25)" }}>
+              {loading ? <><Loader2 size={16} style={{ animation: "spin .7s linear infinite" }} /> Authenticating…</> : "Access Manager"}
+            </button>
+          </form>
         </div>
-        {result && (
-          <div className={`alert ${result.startsWith("✅") ? "alert-success" : "alert-error"}`} style={{ marginBottom: "16px" }}>
-            {result}
+      </div>
+    );
+  }
+
+  // ── Main panel ─────────────────────────────────────────────────────────────
+  return (
+    <div style={{ minHeight: "100vh", background: "#030712", fontFamily: "'Inter', 'Poppins', sans-serif", color: "#e2e8f0" }}>
+      <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
+      <style>{`*,*::before,*::after{box-sizing:border-box} @keyframes spin{to{transform:rotate(360deg)}} @keyframes slideIn{from{opacity:0;transform:translateX(20px)} to{opacity:1;transform:translateX(0)}}`}</style>
+
+      {toasts.map(t => <Toast key={t.id} msg={t.msg} type={t.type} onClose={() => removeToast(t.id)} />)}
+      {showAddModal && <AddBotModal onClose={() => setShowAddModal(false)} onAdd={handleAddBot} />}
+
+      {/* Nav */}
+      <nav style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: ".9rem 1.5rem", background: "rgba(3,7,18,.92)", backdropFilter: "blur(24px)", borderBottom: "1px solid rgba(99,102,241,.1)", position: "sticky", top: 0, zIndex: 100, gap: ".8rem", flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: ".7rem" }}>
+          <div style={{ width: 36, height: 36, borderRadius: 10, background: "linear-gradient(135deg,rgba(99,102,241,.25),rgba(79,195,247,.15))", border: "1.5px solid rgba(99,102,241,.4)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+            <Bot size={18} style={{ color: "#818cf8" }} />
+          </div>
+          <div>
+            <div style={{ fontWeight: 900, fontSize: "1rem", color: "#e2e8f0", lineHeight: 1.1 }}>Bot Manager</div>
+            <div style={{ fontSize: ".6rem", color: "#6366f1", fontWeight: 700, letterSpacing: ".07em", textTransform: "uppercase" }}>Admin Panel</div>
+          </div>
+        </div>
+
+        {/* Tabs */}
+        <div style={{ display: "flex", gap: ".35rem", background: "rgba(255,255,255,.03)", border: "1px solid rgba(255,255,255,.07)", borderRadius: 11, padding: ".25rem" }}>
+          {([["bots", <Bot size={13} />, "Bots"], ["users", <Users size={13} />, "Users"]] as const).map(([tab, icon, label]) => (
+            <button key={tab} onClick={() => setActiveTab(tab)} style={{ background: activeTab === tab ? "rgba(99,102,241,.2)" : "transparent", border: activeTab === tab ? "1px solid rgba(99,102,241,.35)" : "1px solid transparent", color: activeTab === tab ? "#818cf8" : "#475569", borderRadius: 8, padding: ".38rem .75rem", fontFamily: "inherit", fontSize: ".78rem", fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: ".3rem", transition: "all .18s" }}>
+              {icon} {label}
+            </button>
+          ))}
+        </div>
+
+        <div style={{ display: "flex", gap: ".6rem", alignItems: "center", flexWrap: "wrap" }}>
+          <div style={{ display: "flex", gap: ".5rem" }}>
+            <div style={{ background: "rgba(34,197,94,.08)", border: "1px solid rgba(34,197,94,.22)", borderRadius: 9, padding: ".28rem .7rem", fontSize: ".7rem", fontWeight: 700, color: "#22c55e" }}>{onlineBots} online</div>
+            <div style={{ background: "rgba(99,102,241,.08)", border: "1px solid rgba(99,102,241,.22)", borderRadius: 9, padding: ".28rem .7rem", fontSize: ".7rem", fontWeight: 700, color: "#818cf8" }}>{bots.length} bots</div>
+          </div>
+          {activeTab === "bots" && (
+            <button onClick={() => loadBots(true)} disabled={refreshing} style={{ background: "rgba(255,255,255,.04)", border: "1px solid rgba(255,255,255,.08)", color: "#475569", borderRadius: 9, padding: ".42rem", cursor: "pointer", display: "flex", alignItems: "center", minWidth: 36, minHeight: 36, justifyContent: "center" }}>
+              <RefreshCw size={14} style={refreshing ? { animation: "spin .7s linear infinite", color: "#6366f1" } : {}} />
+            </button>
+          )}
+          <button onClick={() => { setAuthed(false); localStorage.removeItem("bm_pw"); setAdminPw(""); }} style={{ background: "rgba(239,68,68,.06)", border: "1px solid rgba(239,68,68,.18)", color: "#f87171", borderRadius: 9, padding: ".42rem .8rem", cursor: "pointer", fontFamily: "inherit", fontSize: ".75rem", fontWeight: 700 }}>Log Out</button>
+          {activeTab === "bots" && (
+            <button onClick={() => setShowAddModal(true)} style={{ background: "linear-gradient(135deg,#6366f1,#4f46e5)", color: "#fff", border: "none", borderRadius: 9, padding: ".5rem 1rem", cursor: "pointer", fontFamily: "inherit", fontSize: ".82rem", fontWeight: 700, display: "flex", alignItems: "center", gap: ".35rem", boxShadow: "0 4px 14px rgba(99,102,241,.3)" }}>
+              <Plus size={14} /> Add Bot
+            </button>
+          )}
+        </div>
+      </nav>
+
+      {/* Content */}
+      <div style={{ maxWidth: 1200, margin: "0 auto", padding: "1.8rem 1.5rem" }}>
+        {activeTab === "bots" ? (
+          loading ? (
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "50vh", gap: ".8rem", color: "#334155" }}>
+              <Loader2 size={36} style={{ animation: "spin .8s linear infinite", color: "#6366f1" }} />
+              <span style={{ fontSize: ".9rem" }}>Loading bots…</span>
+            </div>
+          ) : bots.length === 0 ? (
+            <div style={{ textAlign: "center", padding: "4rem 1rem" }}>
+              <div style={{ width: 72, height: 72, borderRadius: 20, background: "rgba(99,102,241,.08)", border: "2px dashed rgba(99,102,241,.25)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 1.2rem" }}>
+                <Bot size={28} style={{ color: "#334155" }} />
+              </div>
+              <div style={{ color: "#475569", fontWeight: 700, fontSize: "1rem", marginBottom: ".4rem" }}>No bots yet</div>
+              <div style={{ color: "#1e293b", fontSize: ".82rem", marginBottom: "1.4rem" }}>Add your first WhatsApp bot to get started</div>
+              <button onClick={() => setShowAddModal(true)} style={{ background: "linear-gradient(135deg,#6366f1,#4f46e5)", color: "#fff", border: "none", borderRadius: 12, padding: ".8rem 1.5rem", cursor: "pointer", fontFamily: "inherit", fontSize: ".88rem", fontWeight: 700, display: "inline-flex", alignItems: "center", gap: ".45rem" }}>
+                <Plus size={15} /> Add Your First Bot
+              </button>
+            </div>
+          ) : (
+            <>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "1.5rem" }}>
+                <h2 style={{ color: "#94a3b8", fontWeight: 800, fontSize: "1rem" }}>All Bots ({bots.length})</h2>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(280px,1fr))", gap: "1rem" }}>
+                {bots.map(bot => (
+                  <BotCard key={bot.botId || bot._id} bot={bot} adminPw={adminPw} onRefresh={() => loadBots(true)} onToast={addToast} />
+                ))}
+              </div>
+            </>
+          )
+        ) : (
+          <div>
+            <div style={{ display: "flex", alignItems: "center", gap: ".7rem", marginBottom: "1.5rem", flexWrap: "wrap" }}>
+              <Users size={18} style={{ color: "#818cf8" }} />
+              <h2 style={{ color: "#94a3b8", fontWeight: 800, fontSize: "1rem" }}>User Management</h2>
+              <div style={{ display: "flex", gap: ".5rem", marginLeft: "auto", flexWrap: "wrap" }}>
+                <div style={{ display: "flex", gap: ".4rem", alignItems: "center", background: "rgba(79,195,247,.06)", border: "1px solid rgba(79,195,247,.15)", borderRadius: 9, padding: ".28rem .7rem", fontSize: ".7rem", color: "#4fc3f7" }}>
+                  <DollarSign size={11} /> Balances
+                </div>
+                <div style={{ display: "flex", gap: ".4rem", alignItems: "center", background: "rgba(99,102,241,.06)", border: "1px solid rgba(99,102,241,.15)", borderRadius: 9, padding: ".28rem .7rem", fontSize: ".7rem", color: "#818cf8" }}>
+                  <Shield size={11} /> Full Admin Control
+                </div>
+              </div>
+            </div>
+            <UsersTab adminPw={adminPw} onToast={addToast} />
           </div>
         )}
-        <div style={{ display: "flex", gap: "10px" }}>
-          <button className="btn btn-cyan" onClick={handleMigrate} disabled={loading || !json.trim()}>
-            {loading ? "Migrating..." : "📦 Run Migration"}
-          </button>
-          <button className="btn btn-ghost btn-sm" onClick={() => { setJson(""); setResult(null); }}>Clear</button>
-        </div>
-      </div>
-    </>
-  );
-}
-
-// ─── ACTIONS TAB ─────────────────────────────────────────────────────────────
-function ActionsTab() {
-  const [message, setMessage] = useState("");
-  const [targets, setTargets] = useState<string[]>([]);
-  const [result, setResult] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-
-  const BOT_OPTIONS = MOCK_BOTS.filter(b => b.status === "active").map(b => b.id);
-
-  async function handleBroadcast() {
-    if (!message.trim() || targets.length === 0) return;
-    setLoading(true); setResult(null);
-    await new Promise(r => setTimeout(r, 1000));
-    setResult(`✅ Message broadcast to ${targets.length} bot(s) successfully.`);
-    setLoading(false);
-  }
-
-  return (
-    <>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", marginBottom: "16px" }}>
-        <div className="glass-card" style={{ padding: "20px" }}>
-          <h3 style={{ fontSize: "0.9rem", fontWeight: 600, color: "#fff", marginBottom: "16px", display: "flex", alignItems: "center", gap: "8px" }}>
-            📢 Broadcast Message
-          </h3>
-          <div className="form-group">
-            <label className="form-label">Select Target Bots</label>
-            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-              {MOCK_BOTS.filter(b => b.status === "active").map(bot => (
-                <label key={bot.id} style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer", fontSize: "0.84rem", color: "var(--text-secondary)" }}>
-                  <input type="checkbox" checked={targets.includes(bot.id)}
-                    onChange={e => setTargets(p => e.target.checked ? [...p, bot.id] : p.filter(t => t !== bot.id))}
-                    style={{ accentColor: "var(--cyan)" }} />
-                  {bot.name}
-                </label>
-              ))}
-            </div>
-          </div>
-          <div className="form-group">
-            <label className="form-label">Message</label>
-            <textarea className="form-textarea" placeholder="Type your broadcast message..." value={message} onChange={e => setMessage(e.target.value)} />
-          </div>
-          {result && <div className={`alert ${result.startsWith("✅") ? "alert-success" : "alert-error"}`} style={{ marginBottom: "12px" }}>{result}</div>}
-          <button className="btn btn-cyan btn-sm" onClick={handleBroadcast} disabled={loading || !message.trim() || targets.length === 0}>
-            {loading ? "Sending..." : "📢 Send Broadcast"}
-          </button>
-        </div>
-
-        <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-          {[
-            { icon: "🔄", label: "Restart All Active Bots", desc: "Gracefully restart all bots that are currently active", cls: "btn-outline" },
-            { icon: "🧹", label: "Clear Duplicate Cache", desc: "Remove all cached duplicate phone number records", cls: "btn-ghost" },
-            { icon: "📊", label: "Regenerate Analytics", desc: "Force-rebuild all analytics and stats from raw data", cls: "btn-ghost" },
-            { icon: "🚨", label: "Emergency Stop All Bots", desc: "Immediately stop all running bots (use with caution)", cls: "btn-danger" },
-          ].map(action => (
-            <div key={action.label} className="glass-card" style={{ padding: "16px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px" }}>
-              <div>
-                <div style={{ fontSize: "0.875rem", fontWeight: 600, color: "#fff", marginBottom: "2px" }}>
-                  {action.icon} {action.label}
-                </div>
-                <div style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>{action.desc}</div>
-              </div>
-              <button className={`btn ${action.cls} btn-sm`} style={{ flexShrink: 0 }}>Run</button>
-            </div>
-          ))}
-        </div>
-      </div>
-    </>
-  );
-}
-
-// ─── LOGS TAB ─────────────────────────────────────────────────────────────────
-function LogsTab() {
-  const [levelFilter, setLevelFilter] = useState<string>("all");
-  const filtered = MOCK_LOGS.filter(l => levelFilter === "all" || l.level === levelFilter);
-
-  return (
-    <>
-      <div style={{ display: "flex", gap: "10px", marginBottom: "16px" }}>
-        <select className="form-select" style={{ width: "140px" }} value={levelFilter} onChange={e => setLevelFilter(e.target.value)}>
-          <option value="all">All Levels</option>
-          <option value="info">Info</option>
-          <option value="warn">Warning</option>
-          <option value="error">Error</option>
-        </select>
-        <button className="btn btn-ghost btn-sm" style={{ marginLeft: "auto" }}>⬇ Export Logs</button>
-      </div>
-      <div className="glass-card" style={{ padding: 0 }}>
-        <div className="table-wrapper">
-          <table>
-            <thead>
-              <tr>
-                <th>Timestamp</th>
-                <th>Level</th>
-                <th>Message</th>
-                <th>Bot ID</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map(log => (
-                <tr key={log.id}>
-                  <td style={{ fontFamily: "monospace", fontSize: "0.76rem", color: "var(--text-muted)", whiteSpace: "nowrap" }}>{log.timestamp}</td>
-                  <td><StatusBadge status={log.level === "warn" ? "warning" : log.level} /></td>
-                  <td style={{ fontSize: "0.82rem", maxWidth: "500px" }}>{log.message}</td>
-                  <td className="td-mono" style={{ fontSize: "0.76rem" }}>{log.botId || "—"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </>
-  );
-}
-
-// ─── TABS CONFIG ──────────────────────────────────────────────────────────────
-const TABS = [
-  { id: "dashboard", label: "Dashboard", icon: "📊" },
-  { id: "bots", label: "Bots", icon: "🤖" },
-  { id: "users", label: "Users", icon: "👥" },
-  { id: "duplicates", label: "Duplicates", icon: "⚠️" },
-  { id: "migration", label: "Migration", icon: "📦" },
-  { id: "actions", label: "Actions", icon: "⚡" },
-  { id: "logs", label: "Logs", icon: "📋" },
-];
-
-// ─── MAIN MANAGER COMPONENT ───────────────────────────────────────────────────
-export default function Manager() {
-  const [authed, setAuthed] = useState(() => !!localStorage.getItem("admin_key"));
-  const [activeTab, setActiveTab] = useState("dashboard");
-  const [stats] = useState<AdminStats>(MOCK_STATS);
-
-  if (!authed) {
-    return <LoginScreen onAuth={() => setAuthed(true)} />;
-  }
-
-  function logout() {
-    localStorage.removeItem("admin_key");
-    setAuthed(false);
-  }
-
-  const currentTab = TABS.find(t => t.id === activeTab);
-
-  return (
-    <div className="manager-layout">
-      {/* SIDEBAR */}
-      <aside className="mgr-sidebar">
-        <div className="mgr-sidebar-head">
-          <div className="mgr-logo-icon">⚔️</div>
-          <div>
-            <div className="mgr-logo">KonoBot</div>
-            <div className="mgr-logo-sub">Admin Panel</div>
-          </div>
-        </div>
-        <nav className="mgr-nav">
-          <div className="mgr-nav-section">Management</div>
-          {TABS.slice(0, 4).map(t => (
-            <button key={t.id} className={`mgr-nav-item${activeTab === t.id ? " active" : ""}`} onClick={() => setActiveTab(t.id)}>
-              {t.icon} {t.label}
-              {t.id === "duplicates" && stats.duplicatesFound > 0 && (
-                <span className="mgr-nav-badge">{stats.duplicatesFound}</span>
-              )}
-            </button>
-          ))}
-          <div className="mgr-nav-section">Tools</div>
-          {TABS.slice(4).map(t => (
-            <button key={t.id} className={`mgr-nav-item${activeTab === t.id ? " active" : ""}`} onClick={() => setActiveTab(t.id)}>
-              {t.icon} {t.label}
-            </button>
-          ))}
-        </nav>
-        <div className="mgr-sidebar-foot">
-          <button className="mgr-nav-item" style={{ width: "100%" }} onClick={logout}>
-            🔓 Logout
-          </button>
-        </div>
-      </aside>
-
-      {/* MAIN */}
-      <div className="mgr-main">
-        <div className="mgr-topbar">
-          <span className="mgr-topbar-title">{currentTab?.icon} {currentTab?.label}</span>
-          <div className="mgr-topbar-actions">
-            <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
-              Uptime: <span style={{ color: "var(--green)" }}>{stats.uptime}</span>
-            </span>
-            <div style={{ width: "8px", height: "8px", borderRadius: "50%", background: "var(--green)", boxShadow: "0 0 8px var(--green)" }} title="System Online" />
-          </div>
-        </div>
-
-        <div className="mgr-content animate-fade">
-          {activeTab === "dashboard" && <DashboardTab stats={stats} />}
-          {activeTab === "bots" && <BotsTab />}
-          {activeTab === "users" && <UsersTab />}
-          {activeTab === "duplicates" && <DuplicatesTab />}
-          {activeTab === "migration" && <MigrationTab />}
-          {activeTab === "actions" && <ActionsTab />}
-          {activeTab === "logs" && <LogsTab />}
-        </div>
       </div>
     </div>
   );
