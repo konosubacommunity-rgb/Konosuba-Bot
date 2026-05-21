@@ -13,6 +13,7 @@ app.use(express.urlencoded({ extended: true }));
 app.get('/api/healthz', (_req, res) => res.json({ status: 'ok', service: 'konosuba-api' }));
 app.use('/api/website', require('./src/routes/website-sync'));
 app.use('/api/website', require('./src/routes/admin-migration'));
+app.use('/api/website', require('./src/routes/bot-connect'));
 
 // ─── Static frontend serving ─────────────────────────────────────────────────
 const websiteDist = path.join(__dirname, '..', 'konosuba-website', 'dist');

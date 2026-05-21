@@ -1,13 +1,14 @@
-import { useState, useEffect, useCallback } from 'react';
-import { adminApi, AdminUser, PaginationInfo, DuplicateGroup, MigrationResult } from '../lib/api';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { adminApi, AdminUser, PaginationInfo, DuplicateGroup, MigrationResult, BotEntry, PairingStatus } from '../lib/api';
 
-type MainTab = 'dashboard' | 'users' | 'duplicates' | 'migration' | 'actions';
+type MainTab = 'dashboard' | 'users' | 'duplicates' | 'migration' | 'actions' | 'bots';
 
 interface Stats { totalUsers?: number; activeUsers?: number; totalCoinsInCirculation?: number; activeBots?: number; }
 interface Confirm { title: string; message: string; action: () => Promise<void>; }
 
 const NAV: { id: MainTab; icon: string; label: string }[] = [
   { id: 'dashboard',  icon: '◈',  label: 'Dashboard' },
+  { id: 'bots',       icon: '🤖', label: 'Bots' },
   { id: 'users',      icon: '👥', label: 'Users' },
   { id: 'duplicates', icon: '🔍', label: 'Duplicates' },
   { id: 'migration',  icon: '⚙️', label: 'Migration' },
@@ -42,6 +43,17 @@ export default function Manager() {
   const [confirm, setConfirm]     = useState<Confirm | null>(null);
   const [toast, setToast]         = useState('');
 
+  // ── Bots state ─────────────────────────────────────────────────────────────
+  const [bots, setBots]               = useState<BotEntry[]>([]);
+  const [botsLoading, setBotsLoading] = useState(false);
+  const [showAddBot, setShowAddBot]   = useState(false);
+  const [botPhone, setBotPhone]       = useState('');
+  const [botName, setBotName]         = useState('');
+  const [pairingLoading, setPairingLoading] = useState(false);
+  const [activePairing, setActivePairing]   = useState<{ botId: string; code: string } | null>(null);
+  const [pairStatus, setPairStatus]         = useState<PairingStatus['status'] | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   function showToast(msg: string) { setToast(msg); setTimeout(() => setToast(''), 3500); }
   function doConfirm(c: Confirm)  { setConfirm(c); }
   async function runConfirm() {
@@ -71,8 +83,59 @@ export default function Manager() {
     finally { setUsersLoading(false); }
   }, [authed, search]);
 
+  const loadBots = useCallback(async () => {
+    if (!authed) return;
+    setBotsLoading(true);
+    try { const res = await adminApi.listBots(); setBots(res.bots); }
+    catch (e: unknown) { showToast('❌ ' + (e instanceof Error ? e.message : 'Failed loading bots')); }
+    finally { setBotsLoading(false); }
+  }, [authed]);
+
+  const stopPolling = useCallback(() => {
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+  }, []);
+
+  const startPairing = useCallback(async () => {
+    if (!botPhone.trim()) return;
+    setPairingLoading(true);
+    try {
+      const res = await adminApi.startPairing(botPhone.trim(), botName.trim() || `Bot ${botPhone.trim()}`);
+      if (res.status === 'already_connected') {
+        showToast('✅ Bot is already connected!');
+        setShowAddBot(false); setBotPhone(''); setBotName('');
+        loadBots();
+        return;
+      }
+      if (res.pairingCode) {
+        setActivePairing({ botId: res.botId, code: res.pairingCode });
+        setPairStatus('pending');
+        // Poll for connection
+        pollRef.current = setInterval(async () => {
+          try {
+            const s = await adminApi.getPairingStatus(res.botId);
+            setPairStatus(s.status);
+            if (s.status === 'connected') {
+              stopPolling();
+              showToast('✅ Bot connected successfully!');
+              loadBots();
+            } else if (s.status === 'disconnected') {
+              stopPolling();
+              showToast('❌ Bot disconnected. Try again.');
+            }
+          } catch {}
+        }, 3000);
+      }
+    } catch (e: unknown) {
+      showToast('❌ ' + (e instanceof Error ? e.message : 'Pairing failed'));
+    } finally {
+      setPairingLoading(false);
+    }
+  }, [botPhone, botName, loadBots, stopPolling]);
+
   useEffect(() => { loadStats(); }, [loadStats]);
   useEffect(() => { if (tab === 'users') loadUsers(1, search); }, [tab]); // eslint-disable-line
+  useEffect(() => { if (tab === 'bots') loadBots(); }, [tab, loadBots]);
+  useEffect(() => () => stopPolling(), [stopPolling]);
 
   // ── LOGIN SCREEN ────────────────────────────────────────────────────────────
   if (!authed) return (
@@ -604,6 +667,184 @@ export default function Manager() {
                       </div>
                     </div>
                   )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ══ BOTS ══ */}
+          {tab === 'bots' && (
+            <div>
+              <div className="page-header" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: '1rem' }}>
+                <div>
+                  <h1 className="page-title">Bot Instances</h1>
+                  <p className="page-subtitle">Connect and manage your WhatsApp bot accounts</p>
+                </div>
+                <div style={{ display: 'flex', gap: '0.75rem' }}>
+                  <button className="m-btn m-btn-ghost" onClick={loadBots} disabled={botsLoading}>↻ Refresh</button>
+                  <button className="m-btn m-btn-primary" onClick={() => { setShowAddBot(true); setActivePairing(null); setPairStatus(null); setBotPhone(''); setBotName(''); }}>
+                    + Add Bot
+                  </button>
+                </div>
+              </div>
+
+              {/* ADD BOT MODAL */}
+              {showAddBot && (
+                <div className="modal-overlay">
+                  <div className="modal-box" style={{ maxWidth: 500 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+                      <h3 className="modal-title" style={{ marginBottom: 0 }}>🤖 Add New Bot</h3>
+                      <button style={{ background: 'none', border: 'none', color: 'var(--text-dim)', fontSize: '1.5rem', cursor: 'pointer' }}
+                        onClick={() => { setShowAddBot(false); setActivePairing(null); setPairStatus(null); stopPolling(); }}>×</button>
+                    </div>
+
+                    {!activePairing ? (
+                      <>
+                        <div className="info-box" style={{ marginBottom: '1.25rem' }}>
+                          Enter the WhatsApp phone number for your bot. The server will request a pairing code from WhatsApp — enter it in your phone to link the bot.
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginBottom: '1.5rem' }}>
+                          <div>
+                            <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-dim)', marginBottom: '0.4rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                              Bot Phone Number *
+                            </label>
+                            <input className="m-input" type="tel" placeholder="e.g. 2348012345678 (with country code, no +)"
+                              value={botPhone} onChange={e => setBotPhone(e.target.value)}
+                              onKeyDown={e => e.key === 'Enter' && startPairing()} />
+                            <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginTop: '0.3rem' }}>Include country code. No spaces or +. Example: 2348012345678</div>
+                          </div>
+                          <div>
+                            <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-dim)', marginBottom: '0.4rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                              Bot Name (optional)
+                            </label>
+                            <input className="m-input" type="text" placeholder="e.g. Konosuba Bot"
+                              value={botName} onChange={e => setBotName(e.target.value)} />
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', gap: '0.75rem' }}>
+                          <button className="m-btn m-btn-primary" style={{ flex: 1, justifyContent: 'center' }}
+                            disabled={pairingLoading || !botPhone.trim()} onClick={startPairing}>
+                            {pairingLoading ? '⏳ Requesting code…' : '🔗 Get Pairing Code'}
+                          </button>
+                          <button className="m-btn m-btn-ghost" onClick={() => setShowAddBot(false)}>Cancel</button>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        {pairStatus === 'connected' ? (
+                          <div className="success-box" style={{ textAlign: 'center', padding: '2rem' }}>
+                            <div style={{ fontSize: '3rem', marginBottom: '0.75rem' }}>✅</div>
+                            <div style={{ fontWeight: 700, fontSize: '1.1rem' }}>Bot Connected!</div>
+                            <div style={{ color: 'var(--text-dim)', fontSize: '0.88rem', marginTop: '0.5rem' }}>Your bot is now linked and active.</div>
+                            <button className="m-btn m-btn-primary" style={{ marginTop: '1.5rem', justifyContent: 'center' }}
+                              onClick={() => { setShowAddBot(false); setActivePairing(null); setPairStatus(null); loadBots(); }}>
+                              Done
+                            </button>
+                          </div>
+                        ) : pairStatus === 'disconnected' ? (
+                          <div style={{ textAlign: 'center', padding: '1.5rem 0' }}>
+                            <div style={{ fontSize: '2.5rem', marginBottom: '0.75rem' }}>❌</div>
+                            <div style={{ fontWeight: 700 }}>Connection failed</div>
+                            <div style={{ color: 'var(--text-dim)', fontSize: '0.88rem', margin: '0.5rem 0 1.5rem' }}>The pairing was not completed. Please try again.</div>
+                            <button className="m-btn m-btn-primary" onClick={() => { setActivePairing(null); setPairStatus(null); }}>Try Again</button>
+                          </div>
+                        ) : (
+                          <>
+                            <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
+                              <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '0.75rem' }}>Your Pairing Code</div>
+                              <div style={{ fontFamily: 'monospace', fontSize: '2.8rem', fontWeight: 900, letterSpacing: '0.25em', color: 'var(--cyan)', textShadow: '0 0 30px rgba(0,212,255,0.4)', background: 'rgba(0,212,255,0.07)', border: '1px solid rgba(0,212,255,0.25)', borderRadius: 14, padding: '1rem 1.5rem', display: 'inline-block' }}>
+                                {activePairing.code}
+                              </div>
+                              <div style={{ marginTop: '0.75rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
+                                <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--cyan)', animation: 'ping 1.5s ease-in-out infinite' }} />
+                                <span style={{ color: 'var(--text-dim)', fontSize: '0.82rem' }}>Waiting for you to enter the code…</span>
+                              </div>
+                            </div>
+
+                            <div style={{ background: 'rgba(0,0,0,0.4)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 12, padding: '1rem 1.25rem' }}>
+                              <div style={{ color: 'var(--cyan)', fontWeight: 700, fontSize: '0.82rem', marginBottom: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>How to enter this code</div>
+                              {[
+                                'Open WhatsApp on your bot\'s phone',
+                                'Tap ⋮ Menu → Linked Devices',
+                                'Tap "Link a Device"',
+                                'Tap "Link with phone number instead"',
+                                `Enter the code above: ${activePairing.code}`,
+                              ].map((step, i) => (
+                                <div key={i} style={{ display: 'flex', gap: '0.75rem', alignItems: 'flex-start', marginBottom: '0.5rem' }}>
+                                  <div style={{ width: 22, height: 22, borderRadius: '50%', background: 'rgba(0,212,255,0.15)', border: '1px solid rgba(0,212,255,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.72rem', fontWeight: 700, color: 'var(--cyan)', flexShrink: 0 }}>{i + 1}</div>
+                                  <div style={{ color: 'var(--text-dim)', fontSize: '0.85rem', paddingTop: 2 }}>{step}</div>
+                                </div>
+                              ))}
+                            </div>
+
+                            <div style={{ marginTop: '1.25rem', display: 'flex', gap: '0.75rem' }}>
+                              <button className="m-btn m-btn-ghost" style={{ flex: 1, justifyContent: 'center' }}
+                                onClick={() => { stopPolling(); setActivePairing(null); setPairStatus(null); }}>
+                                ← Back
+                              </button>
+                              <button className="m-btn m-btn-ghost" style={{ justifyContent: 'center' }}
+                                onClick={() => navigator.clipboard?.writeText(activePairing.code).then(() => showToast('Code copied!'))}>
+                                Copy Code
+                              </button>
+                            </div>
+                          </>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* BOTS LIST */}
+              {botsLoading ? (
+                <div style={{ textAlign: 'center', padding: '4rem', color: 'var(--text-dim)' }}>
+                  <div style={{ fontSize: '2rem', marginBottom: '0.75rem', animation: 'spin 2s linear infinite' }}>⚙️</div>
+                  Loading bots...
+                </div>
+              ) : bots.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '4rem 2rem', color: 'var(--text-dim)' }}>
+                  <div style={{ fontSize: '3.5rem', marginBottom: '1rem' }}>🤖</div>
+                  <div style={{ fontWeight: 700, fontSize: '1.1rem', color: 'var(--text-primary)' }}>No bots connected</div>
+                  <div style={{ fontSize: '0.88rem', marginTop: '0.5rem', marginBottom: '1.5rem' }}>Add your first bot to get started</div>
+                  <button className="m-btn m-btn-primary" onClick={() => { setShowAddBot(true); setActivePairing(null); setPairStatus(null); }}>+ Add Bot</button>
+                </div>
+              ) : (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '1rem' }}>
+                  {bots.map(bot => (
+                    <div key={bot._id} style={{ background: 'rgba(8,8,25,0.9)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 16, padding: '1.25rem 1.5rem' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem', marginBottom: '1rem' }}>
+                        <div style={{ width: 48, height: 48, borderRadius: '50%', background: 'linear-gradient(135deg,var(--cyan),var(--purple))', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.4rem', flexShrink: 0 }}>🤖</div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontWeight: 700, fontSize: '0.95rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{bot.name}</div>
+                          <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>+{bot.phone}</div>
+                        </div>
+                        <span style={{ fontSize: '0.72rem', fontWeight: 700, padding: '0.25rem 0.65rem', borderRadius: 20,
+                          background: bot.status === 'connected' ? 'rgba(74,222,128,0.15)' : 'rgba(255,255,255,0.06)',
+                          color: bot.status === 'connected' ? 'var(--green)' : 'var(--text-muted)',
+                          border: `1px solid ${bot.status === 'connected' ? 'rgba(74,222,128,0.3)' : 'rgba(255,255,255,0.08)'}`,
+                        }}>
+                          {bot.status === 'connected' ? '● Online' : '○ Offline'}
+                        </span>
+                      </div>
+                      <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginBottom: '1rem' }}>
+                        Added {bot.createdAt ? new Date(bot.createdAt).toLocaleDateString() : '—'}
+                      </div>
+                      <div style={{ display: 'flex', gap: '0.6rem' }}>
+                        <button className="m-btn m-btn-ghost m-btn-sm" style={{ flex: 1, justifyContent: 'center' }}
+                          onClick={() => { setShowAddBot(true); setBotPhone(bot.phone); setBotName(bot.name); setActivePairing(null); setPairStatus(null); }}>
+                          🔄 Re-link
+                        </button>
+                        <button className="m-btn m-btn-danger m-btn-sm"
+                          onClick={() => doConfirm({
+                            title: 'Remove Bot',
+                            message: `Remove ${bot.name} (+${bot.phone})? The bot session will be disconnected.`,
+                            action: async () => { await adminApi.deleteBot(bot.botId); showToast('🗑️ Bot removed'); loadBots(); },
+                          })}>
+                          🗑️
+                        </button>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>

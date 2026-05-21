@@ -1,14 +1,68 @@
-# MongoDB Atlas connection string (required)
-MONGO_URI=mongodb+srv://user:pass@cluster.mongodb.net/konosuba
+# Konosuba WhatsApp Bot Platform
 
-# JWT secret for signing user tokens (use a long random string)
-JWT_SECRET=change_me_to_a_long_random_secret
+A premium anime-inspired WhatsApp bot management platform with dark fantasy aesthetics.
 
-# Admin panel password
-ADMIN_PASSWORD=your_admin_password_here
+## Structure
 
-# Webhook secret shared with your Baileys bot (optional)
-BOT_WEBHOOK_SECRET=optional_webhook_secret
+```
+/api-server      — Express API (Node.js + MongoDB)
+/konosuba-website — Landing page + user dashboard (React + Vite)
+/bot-manager     — Admin control panel (React + Vite)
+```
 
-# Port — Render sets this automatically
-PORT=5000
+## Deploy on Render — Recommended (Single Web Service)
+
+Deploy everything as **one** Render Web Service — the API server builds both frontends and serves them as static files.
+
+### In the Render Dashboard → New Web Service:
+
+| Field | Value |
+|-------|-------|
+| **Root Directory** | *(leave blank — repo root)* |
+| **Build Command** | `cd konosuba-website && npm install && npm run build && cd ../bot-manager && npm install && npm run build && cd ../api-server && npm install` |
+| **Start Command** | `node api-server/server.js` |
+
+### Environment Variables to set:
+| Variable | Description |
+|----------|-------------|
+| `MONGO_URI` | MongoDB Atlas URI |
+| `JWT_SECRET` | Long random secret for JWT signing |
+| `ADMIN_PASSWORD` | Password for admin panel |
+| `BOT_WEBHOOK_SECRET` | Optional webhook secret |
+
+---
+
+## Deploy on Render — Separate Services (3 services)
+
+If you prefer separate services, set `VITE_API_URL` on each frontend.
+
+### Service 1 — API Server (Web Service)
+- Root: `api-server`
+- Build: `npm install`
+- Start: `node server.js`
+
+### Service 2 — Website (Static Site)
+- Root: `konosuba-website`
+- Build: `npm install && npm run build`
+- Publish dir: `dist`
+- **Environment var**: `VITE_API_URL=https://your-api-server.onrender.com`
+
+### Service 3 — Bot Manager (Static Site)
+- Root: `bot-manager`
+- Build: `npm install && npm run build`
+- Publish dir: `dist`
+- **Environment var**: `VITE_API_URL=https://your-api-server.onrender.com`
+
+> The `_redirects` file in each frontend's `public/` folder handles SPA routing on Render static sites automatically.
+
+---
+
+## Routes
+- `/` — Landing page
+- `/auth` — Login / Register  
+- `/dashboard` — User dashboard (requires login)
+- `/manager` — Admin bot manager (requires admin key)
+- `/api/*` — REST API
+
+## Bot Integration
+Point your Baileys bot to POST user data to `/api/website/*` with `x-admin-key` header set to your `BOT_WEBHOOK_SECRET`.

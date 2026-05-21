@@ -87,6 +87,30 @@ export interface MigrationResult {
   message: string;
 }
 
+export interface BotEntry {
+  _id: string;
+  botId: string;
+  name: string;
+  phone: string;
+  avatarData?: string;
+  createdAt: string;
+  status?: 'connected' | 'offline' | 'pending' | 'disconnected';
+}
+
+export interface PairingResult {
+  success: boolean;
+  botId: string;
+  pairingCode?: string;
+  status: 'pending' | 'already_connected';
+  message?: string;
+}
+
+export interface PairingStatus {
+  status: 'pending' | 'connected' | 'disconnected' | 'not_found';
+  pairingCode?: string;
+  phone?: string;
+}
+
 export const adminApi = {
   // ── Stats ──────────────────────────────────────────────────────────────
   getStats: () => request<Record<string, unknown>>('/stats'),
@@ -152,4 +176,20 @@ export const adminApi = {
   // ── Migration ──────────────────────────────────────────────────────────
   runMigration: () =>
     request<MigrationResult>('/admin/run-migration', { method: 'POST' }),
+
+  // ── Bots ───────────────────────────────────────────────────────────────
+  listBots: () =>
+    request<{ bots: BotEntry[] }>('/admin/bots'),
+
+  startPairing: (phone: string, name: string) =>
+    request<PairingResult>('/admin/bots/start-pairing', {
+      method: 'POST',
+      body: JSON.stringify({ phone, name }),
+    }),
+
+  getPairingStatus: (botId: string) =>
+    request<PairingStatus>(`/admin/bots/pairing-status/${encodeURIComponent(botId)}`),
+
+  deleteBot: (botId: string) =>
+    request<{ success: boolean }>(`/admin/bots/${encodeURIComponent(botId)}`, { method: 'DELETE' }),
 };
