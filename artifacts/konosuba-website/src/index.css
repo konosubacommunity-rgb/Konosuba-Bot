@@ -1,0 +1,13 @@
+@import "tailwindcss";
+
+@layer base {
+  *, *::before, *::after {
+    box-sizing: border-box;
+  }
+  body {
+    margin: 0;
+    padding: 0;
+    background: #080812;
+    color: #eceff1;
+  }
+}
