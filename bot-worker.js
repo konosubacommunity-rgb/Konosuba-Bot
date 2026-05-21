@@ -52,6 +52,48 @@ function clearSession() {
   }
 }
 
+// ── Normalise a raw WhatsApp ID to a proper JID ──────────────────────────────
+//
+// WhatsApp v6+ uses LIDs (xxx@lid) in group participant fields.
+// We always want to work with standard JIDs (phone@s.whatsapp.net).
+// If the ID ends with @lid we return it as-is — the model's findByWhatsAppId
+// static handles both forms.  We never silently drop an identifier.
+//
+function resolveJid(id) {
+  if (!id) return id;
+  // Already a standard user JID
+  if (id.endsWith('@s.whatsapp.net')) return id;
+  // Group JID — returned unchanged
+  if (id.endsWith('@g.us')) return id;
+  // LID — return as-is; User.findByWhatsAppId handles it
+  return id;
+}
+
+// ── Find or create a user, supporting both JID and LID ───────────────────────
+async function findOrCreateUser(sender, pushName) {
+  // Try JID first, then LID
+  let user = await User.findByWhatsAppId(sender);
+
+  if (!user) {
+    const isLid = sender.includes('@lid');
+    const doc = isLid
+      ? { lid: sender, name: pushName || sender.split('@')[0] }
+      : { jid: sender, name: pushName || sender.split('@')[0] };
+
+    // Use findOneAndUpdate with upsert to avoid race conditions
+    user = await User.findOneAndUpdate(
+      isLid ? { lid: sender } : { jid: sender },
+      { $setOnInsert: doc },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+  } else if (pushName && user.name !== pushName) {
+    user.name = pushName;
+    await user.save();
+  }
+
+  return user;
+}
+
 async function startBot() {
   await connectDB();
 
@@ -77,6 +119,26 @@ async function startBot() {
     keepAliveIntervalMs:            10000,
     retryRequestDelayMs:            250,
   });
+
+  // ── Request pairing code immediately after socket creation ────────────────
+  //
+  // requestPairingCode MUST be called before the connection opens.
+  // Calling it inside connection === 'open' is too late and will fail.
+  //
+  if (!hadCredentials && BOT_PHONE) {
+    setTimeout(async () => {
+      try {
+        const code = await sock.requestPairingCode(BOT_PHONE.replace(/\D/g, ''));
+        const formatted = code.match(/.{1,4}/g).join('-');
+        console.log(`\n╔══════════════════════════════╗`);
+        console.log(`║  PAIRING CODE: ${formatted}  ║`);
+        console.log(`╚══════════════════════════════╝`);
+        console.log('Open WhatsApp → Settings → Linked Devices → Link a Device\n');
+      } catch (err) {
+        console.error('Could not get pairing code:', err.message);
+      }
+    }, 3000);
+  }
 
   let credsSavedThisSession = false;
   sock.ev.on('creds.update', () => { credsSavedThisSession = true; saveCreds(); });
@@ -108,19 +170,6 @@ async function startBot() {
       console.log('Bot connected!');
       console.log(`Bot Name: ${config.BOT_NAME}`);
       console.log(`Logged in as: ${sock.user?.id}`);
-
-      // Request pairing code if not registered yet
-      if (!hadCredentials && BOT_PHONE) {
-        await new Promise(r => setTimeout(r, 1500));
-        try {
-          const code = await sock.requestPairingCode(BOT_PHONE);
-          const formatted = code.match(/.{1,4}/g).join('-');
-          console.log(`\nPAIRING CODE: ${formatted}`);
-          console.log('Enter this code in WhatsApp > Settings > Linked Devices > Link a Device\n');
-        } catch (err) {
-          console.error('Could not get pairing code:', err.message);
-        }
-      }
     }
   });
 
@@ -133,7 +182,10 @@ async function startBot() {
         if (message.key.fromMe)                        continue;
         if (isJidBroadcast(message.key.remoteJid))     continue;
 
-        const sender   = message.key.participant || message.key.remoteJid;
+        // Resolve sender — normalise LID to JID where possible
+        const rawSender = message.key.participant || message.key.remoteJid;
+        const sender    = resolveJid(rawSender);
+
         const groupJid = isJidGroup(message.key.remoteJid) ? message.key.remoteJid : null;
         const isGroup  = !!groupJid;
         const dest     = isGroup ? groupJid : sender;
@@ -153,6 +205,7 @@ async function startBot() {
         if (isGroup) {
           try {
             const now     = new Date();
+            // Use sender JID (or LID) consistently
             const updated = await Group.findOneAndUpdate(
               { jid: groupJid, 'memberActivity.jid': sender },
               { $set: { 'memberActivity.$.lastSeen': now }, $inc: { 'memberActivity.$.messageCount': 1 } }
@@ -193,10 +246,10 @@ async function startBot() {
         const args    = body.slice(prefix.length).trim().split(/\s+/);
         const command = args.shift().toLowerCase();
 
-        let user = await User.findOne({ jid: sender });
+        // ── Lookup user by JID or LID — never assume it's always a JID ──────
+        let user = await User.findByWhatsAppId(sender);
         if (!user) {
-          user = new User({ jid: sender, name: message.pushName || sender.split('@')[0] });
-          await user.save();
+          user = await findOrCreateUser(sender, message.pushName);
         } else if (user.name !== message.pushName && message.pushName) {
           user.name = message.pushName;
           await user.save();

@@ -1,15 +1,27 @@
 // FILE: src/utils/website-sync.js
 // ─────────────────────────────────────────────────────────────────────────────
 //  Helper functions for bot command files to log activity entries and push
-//  field updates.  These write DIRECTLY to MongoDB — no HTTP round-trip needed
-//  since the bot and the API share the same process and database connection.
+//  field updates directly to MongoDB (no HTTP round-trip needed since the
+//  bot and API share the same process and database connection).
 //
-//  FIXED: Added `syncUserToWebsite` as an alias for `syncUser` so that all
-//  command files (economy.js, gambling.js, etc.) that import by either name
-//  work correctly.
+//  IMPORTANT: All lookups are by JID first, with LID fallback.
+//  Never pass an @lid address as the primary identifier when the JID is known.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const User = require('../models/User');
+
+/**
+ * Find a user by their WhatsApp JID (or LID as fallback).
+ * Always prefer JID — it maps 1-to-1 with the phone number.
+ *
+ * @param {string} jid  - Full JID "234xxxxxxxx@s.whatsapp.net" or LID "xxx@lid"
+ */
+async function findUser(jid) {
+  if (!jid) return null;
+
+  // Use the model static that handles both JID and LID
+  return User.findByWhatsAppId(jid);
+}
 
 /**
  * Append an entry to a user's activity log (visible on the website dashboard).
@@ -18,11 +30,11 @@ const User = require('../models/User');
  * @param {string} icon        - Emoji to show next to the activity, e.g. "💰"
  * @param {string} title       - Short title, e.g. "Daily Reward"
  * @param {string} description - Detail text, e.g. "Claimed $450"
- * @param {string} type        - Category tag: 'economy' | 'gambling' | 'rpg' | 'pokemon' | 'general' | 'daily'
+ * @param {string} type        - Category: 'economy' | 'gambling' | 'rpg' | 'pokemon' | 'general' | 'daily'
  */
 async function logActivity(jid, icon, title, description, type = 'general') {
   try {
-    const user = await User.findOne({ jid });
+    const user = await findUser(jid);
     if (!user) return;
 
     if (!user.activities) user.activities = [];
@@ -50,13 +62,14 @@ async function logActivity(jid, icon, title, description, type = 'general') {
  * Push arbitrary field updates to a user document.
  * Use this to sync fields (wallet, bank, level, xp, etc.) after any command.
  *
- * @param {string} jid     - Full WhatsApp JID
+ * @param {string} jid     - Full WhatsApp JID (or LID as fallback)
  * @param {object} updates - Plain object of fields to set, e.g. { wallet: 5000 }
  */
 async function syncUser(jid, updates) {
   try {
+    const isLid = jid.includes('@lid');
     await User.findOneAndUpdate(
-      { jid },
+      isLid ? { lid: jid } : { jid },
       { $set: { ...updates, updatedAt: new Date() } }
     );
   } catch (err) {
