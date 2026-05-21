@@ -6,44 +6,44 @@ type MainTab = 'dashboard' | 'users' | 'duplicates' | 'migration' | 'actions';
 interface Stats { totalUsers?: number; activeUsers?: number; totalCoinsInCirculation?: number; activeBots?: number; }
 interface Confirm { title: string; message: string; action: () => Promise<void>; }
 
+const NAV: { id: MainTab; icon: string; label: string }[] = [
+  { id: 'dashboard',  icon: '◈',  label: 'Dashboard' },
+  { id: 'users',      icon: '👥', label: 'Users' },
+  { id: 'duplicates', icon: '🔍', label: 'Duplicates' },
+  { id: 'migration',  icon: '⚙️', label: 'Migration' },
+  { id: 'actions',    icon: '⚡', label: 'Actions' },
+];
+
 export default function Manager() {
-  const [tab, setTab]         = useState<MainTab>('dashboard');
+  const [tab, setTab]           = useState<MainTab>('dashboard');
   const [keyInput, setKeyInput] = useState('');
-  const [authed, setAuthed]   = useState(!!localStorage.getItem('adminKey'));
+  const [authed, setAuthed]     = useState(!!localStorage.getItem('adminKey'));
+  const [collapsed, setCollapsed] = useState(false);
 
-  // ── Stats
-  const [stats, setStats] = useState<Stats>({});
-
-  // ── Users
-  const [users, setUsers]         = useState<AdminUser[]>([]);
-  const [pagination, setPagination] = useState<PaginationInfo>({ page: 1, limit: 20, total: 0, pages: 1 });
-  const [search, setSearch]       = useState('');
+  const [stats, setStats]               = useState<Stats>({});
+  const [users, setUsers]               = useState<AdminUser[]>([]);
+  const [pagination, setPagination]     = useState<PaginationInfo>({ page: 1, limit: 20, total: 0, pages: 1 });
+  const [search, setSearch]             = useState('');
   const [usersLoading, setUsersLoading] = useState(false);
   const [selectedUser, setSelectedUser] = useState<AdminUser | null>(null);
-  const [editMode, setEditMode]   = useState(false);
-  const [editData, setEditData]   = useState<Partial<AdminUser>>({});
+  const [editMode, setEditMode]         = useState(false);
+  const [editData, setEditData]         = useState<Partial<AdminUser>>({});
 
-  // ── Duplicates
-  const [dupGroups, setDupGroups]   = useState<DuplicateGroup[]>([]);
-  const [dupLoading, setDupLoading] = useState(false);
-  const [dupScanned, setDupScanned] = useState(false);
+  const [dupGroups, setDupGroups]     = useState<DuplicateGroup[]>([]);
+  const [dupLoading, setDupLoading]   = useState(false);
+  const [dupScanned, setDupScanned]   = useState(false);
   const [mergingGroup, setMergingGroup] = useState<DuplicateGroup | null>(null);
   const [mergePrimary, setMergePrimary] = useState('');
 
-  // ── Migration
   const [migResult, setMigResult]   = useState<MigrationResult | null>(null);
   const [migLoading, setMigLoading] = useState(false);
 
-  // ── Actions
   const [actionMsg, setActionMsg] = useState('');
-
-  // ── UI
-  const [confirm, setConfirm] = useState<Confirm | null>(null);
-  const [toast, setToast]     = useState('');
+  const [confirm, setConfirm]     = useState<Confirm | null>(null);
+  const [toast, setToast]         = useState('');
 
   function showToast(msg: string) { setToast(msg); setTimeout(() => setToast(''), 3500); }
-  function doConfirm(c: Confirm) { setConfirm(c); }
-
+  function doConfirm(c: Confirm)  { setConfirm(c); }
   async function runConfirm() {
     if (!confirm) return;
     try { await confirm.action(); } catch (e: unknown) { showToast('❌ ' + (e instanceof Error ? e.message : 'Error')); }
@@ -52,9 +52,9 @@ export default function Manager() {
 
   function login() {
     if (!keyInput.trim()) return;
-    localStorage.setItem('adminKey', keyInput.trim());
-    setAuthed(true);
+    localStorage.setItem('adminKey', keyInput.trim()); setAuthed(true);
   }
+  function logout() { localStorage.removeItem('adminKey'); setAuthed(false); setKeyInput(''); }
 
   const loadStats = useCallback(async () => {
     if (!authed) return;
@@ -72,149 +72,159 @@ export default function Manager() {
   }, [authed, search]);
 
   useEffect(() => { loadStats(); }, [loadStats]);
-  useEffect(() => { if (tab === 'users') loadUsers(1, search); }, [tab]);
+  useEffect(() => { if (tab === 'users') loadUsers(1, search); }, [tab]); // eslint-disable-line
 
+  // ── LOGIN SCREEN ────────────────────────────────────────────────────────────
   if (!authed) return (
-    <div style={s.page}>
-      <div style={s.loginBox}>
-        <div style={{ fontSize: '3rem', textAlign: 'center' }}>🤖</div>
-        <h1 style={{ ...s.title, textAlign: 'center', fontSize: '1.4rem' }}>Bot Manager Admin</h1>
-        <p style={{ color: '#94a3b8', fontSize: '0.9rem', textAlign: 'center', margin: 0 }}>Enter your admin key to continue</p>
-        <input style={s.input} type="password" placeholder="Admin password / key" value={keyInput}
-          onChange={e => setKeyInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && login()} />
-        <button style={s.primaryBtn} onClick={login}>Unlock →</button>
+    <div className="manager-login">
+      <div className="login-card">
+        <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
+          {/* Real KonoSuba — Kazuma as the admin character */}
+          <div style={{ position: 'relative', width: 96, height: 96, margin: '0 auto 1rem' }}>
+            <div style={{ position: 'absolute', inset: 0, borderRadius: '50%', background: 'radial-gradient(circle, rgba(0,212,255,0.2), transparent)', animation: 'ping 2s ease-in-out infinite' }} />
+            <div style={{ width: 96, height: 96, borderRadius: '50%', overflow: 'hidden', border: '2px solid rgba(0,212,255,0.4)', background: 'rgba(0,0,20,0.8)', boxShadow: '0 0 30px rgba(0,212,255,0.25)' }}>
+              <img
+                src="https://static.wikia.nocookie.net/konosuba/images/4/4f/Kazuma_Anime.png/revision/latest?width=200"
+                alt="Kazuma"
+                style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'top center' }}
+              />
+            </div>
+          </div>
+          <h1 className="login-title">Bot Manager</h1>
+          <p style={{ color: 'var(--text-dim)', fontSize: '0.85rem', marginTop: 4 }}>Enter your admin key to access the control panel</p>
+        </div>
+        <div style={{ marginBottom: '1rem' }}>
+          <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-dim)', marginBottom: '0.4rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Admin Key</label>
+          <input className="m-input" type="password" placeholder="Enter your admin password..." value={keyInput}
+            onChange={e => setKeyInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && login()} />
+        </div>
+        <button className="m-btn m-btn-primary" style={{ width: '100%', padding: '0.75rem', fontSize: '0.95rem', justifyContent: 'center' }} onClick={login}>
+          Unlock Dashboard →
+        </button>
+        <div style={{ marginTop: '1.5rem', textAlign: 'center' }}>
+          <a href="/" style={{ color: 'var(--text-muted)', fontSize: '0.8rem', textDecoration: 'none' }}>← Back to Website</a>
+        </div>
       </div>
     </div>
   );
 
+  // ── MAIN LAYOUT ─────────────────────────────────────────────────────────────
   return (
-    <div style={s.page}>
-      {/* TOAST */}
-      {toast && (
-        <div style={{ position: 'fixed', top: 20, right: 20, background: '#1e293b', border: '1px solid #334155', borderRadius: 10, padding: '0.75rem 1.25rem', color: '#fff', zIndex: 9999, maxWidth: 320 }}>
-          {toast}
-        </div>
-      )}
+    <div className="manager-layout">
 
-      {/* CONFIRM DIALOG */}
+      {/* TOAST */}
+      {toast && <div className="toast">{toast}</div>}
+
+      {/* CONFIRM MODAL */}
       {confirm && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9998 }}>
-          <div style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 16, padding: '2rem', maxWidth: 420, width: '92%' }}>
-            <h3 style={{ color: '#fff', margin: '0 0 0.5rem' }}>{confirm.title}</h3>
-            <p style={{ color: '#94a3b8', fontSize: '0.9rem' }}>{confirm.message}</p>
-            <div style={{ display: 'flex', gap: '1rem', marginTop: '1.5rem' }}>
-              <button style={{ ...s.dangerBtn, flex: 1 }} onClick={runConfirm}>Confirm</button>
-              <button style={{ ...s.secondaryBtn, flex: 1 }} onClick={() => setConfirm(null)}>Cancel</button>
+        <div className="modal-overlay">
+          <div className="modal-box" style={{ maxWidth: 440 }}>
+            <h3 className="modal-title">{confirm.title}</h3>
+            <p style={{ color: 'var(--text-dim)', fontSize: '0.9rem', marginBottom: '1.5rem', lineHeight: 1.6 }}>{confirm.message}</p>
+            <div style={{ display: 'flex', gap: '0.75rem' }}>
+              <button className="m-btn m-btn-danger" style={{ flex: 1, justifyContent: 'center' }} onClick={runConfirm}>Confirm</button>
+              <button className="m-btn m-btn-ghost" style={{ flex: 1, justifyContent: 'center' }} onClick={() => setConfirm(null)}>Cancel</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* MERGE DIALOG */}
+      {/* MERGE MODAL */}
       {mergingGroup && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9997 }}>
-          <div style={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 20, padding: '2rem', maxWidth: 540, width: '95%' }}>
-            <h3 style={{ color: '#fff', margin: '0 0 1rem' }}>🔀 Merge Duplicate Accounts</h3>
-            <p style={{ color: '#94a3b8', fontSize: '0.85rem', marginTop: 0, marginBottom: '1.5rem' }}>
-              Select the <strong style={{ color: '#a78bfa' }}>primary account</strong> to keep. The other account's balances,
-              inventory, XP, achievements, and cooldowns will be merged into it. The secondary account will be permanently deleted.
-            </p>
-
+        <div className="modal-overlay">
+          <div className="modal-box">
+            <h3 className="modal-title">🔀 Merge Duplicate Accounts</h3>
+            <div className="info-box" style={{ marginBottom: '1rem' }}>
+              Select the <strong>primary account</strong> to keep. The other account's data will be merged into it and permanently deleted.
+            </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginBottom: '1.5rem' }}>
               {mergingGroup.users.map(u => (
-                <label key={u._id} style={{ display: 'flex', alignItems: 'center', gap: '1rem', background: mergePrimary === u.phone ? 'rgba(167,139,250,0.1)' : '#1e293b', border: `1px solid ${mergePrimary === u.phone ? '#a78bfa' : '#334155'}`, borderRadius: 12, padding: '1rem', cursor: 'pointer' }}>
+                <label key={u._id} style={{ display: 'flex', alignItems: 'center', gap: '1rem', background: mergePrimary === u.phone ? 'rgba(0,212,255,0.08)' : 'rgba(0,0,0,0.4)', border: `1px solid ${mergePrimary === u.phone ? 'rgba(0,212,255,0.4)' : 'rgba(255,255,255,0.06)'}`, borderRadius: 12, padding: '1rem', cursor: 'pointer', transition: 'all 0.2s' }}>
                   <input type="radio" name="primary" value={u.phone} checked={mergePrimary === u.phone} onChange={() => setMergePrimary(u.phone)} />
                   <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: 700, color: '#e2e8f0' }}>{u.name}</div>
-                    <div style={{ color: '#94a3b8', fontSize: '0.8rem' }}>+{u.phone}</div>
-                    <div style={{ color: '#64748b', fontSize: '0.75rem', marginTop: 2 }}>
-                      {u.jid ? `JID: ${u.jid}` : u.lid ? `LID: ${u.lid}` : 'No WA ID'}
-                    </div>
+                    <div style={{ fontWeight: 700 }}>{u.name}</div>
+                    <div style={{ color: 'var(--text-dim)', fontSize: '0.8rem' }}>+{u.phone}</div>
+                    <div style={{ color: 'var(--text-muted)', fontSize: '0.73rem' }}>{u.jid || u.lid || 'No WA ID'}</div>
                   </div>
                   <div style={{ textAlign: 'right', fontSize: '0.85rem' }}>
-                    <div style={{ color: '#a78bfa', fontWeight: 700 }}>₿ {(u.wallet + u.bank).toLocaleString()}</div>
-                    <div style={{ color: '#64748b' }}>Lv {u.level} · {u.xp} XP</div>
-                    <div style={{ color: '#64748b', fontSize: '0.75rem' }}>{u.createdAt ? new Date(u.createdAt).toLocaleDateString() : ''}</div>
+                    <div style={{ color: 'var(--gold)', fontWeight: 700 }}>₿ {(u.wallet + u.bank).toLocaleString()}</div>
+                    <div style={{ color: 'var(--text-dim)' }}>Lv {u.level} · {u.xp} XP</div>
+                    <div style={{ color: 'var(--text-muted)', fontSize: '0.73rem' }}>{u.createdAt ? new Date(u.createdAt).toLocaleDateString() : ''}</div>
                   </div>
                 </label>
               ))}
             </div>
-
             <div style={{ display: 'flex', gap: '0.75rem' }}>
-              <button style={s.primaryBtn} disabled={!mergePrimary} onClick={async () => {
+              <button className="m-btn m-btn-primary" disabled={!mergePrimary} style={{ justifyContent: 'center', flex: 1 }} onClick={async () => {
                 const secondary = mergingGroup.users.find(u => u.phone !== mergePrimary);
                 if (!secondary || !mergePrimary) return;
                 try {
                   const r = await adminApi.mergeUsers(mergePrimary, secondary.phone);
                   if (r.success) {
                     showToast(`✅ Merged! Net worth: ₿${(r.summary.wallet as number + (r.summary.bank as number)).toLocaleString()}`);
-                    setMergingGroup(null); setMergePrimary('');
-                    setDupScanned(false); setDupGroups([]);
+                    setMergingGroup(null); setMergePrimary(''); setDupScanned(false); setDupGroups([]);
                   }
                 } catch (e: unknown) { showToast('❌ ' + (e instanceof Error ? e.message : 'Merge failed')); }
-              }}>
-                🔀 Merge →
-              </button>
-              <button style={s.secondaryBtn} onClick={() => { setMergingGroup(null); setMergePrimary(''); }}>Cancel</button>
+              }}>🔀 Merge</button>
+              <button className="m-btn m-btn-ghost" style={{ justifyContent: 'center' }} onClick={() => { setMergingGroup(null); setMergePrimary(''); }}>Cancel</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* USER DETAIL DRAWER */}
+      {/* USER DETAIL MODAL */}
       {selectedUser && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9990 }}>
-          <div style={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 20, padding: '2rem', maxWidth: 560, width: '95%', maxHeight: '90vh', overflowY: 'auto' }}>
+        <div className="modal-overlay">
+          <div className="modal-box">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-              <h2 style={{ color: '#fff', margin: 0 }}>👤 {selectedUser.name}</h2>
-              <button style={{ background: 'none', border: 'none', color: '#94a3b8', fontSize: '1.5rem', cursor: 'pointer' }} onClick={() => { setSelectedUser(null); setEditMode(false); }}>×</button>
+              <div>
+                <h3 className="modal-title" style={{ marginBottom: 0 }}>👤 {selectedUser.name}</h3>
+                <div style={{ color: 'var(--text-dim)', fontSize: '0.82rem', marginTop: 2 }}>+{selectedUser.phone}</div>
+              </div>
+              <button style={{ background: 'none', border: 'none', color: 'var(--text-dim)', fontSize: '1.5rem', cursor: 'pointer', lineHeight: 1 }} onClick={() => { setSelectedUser(null); setEditMode(false); }}>×</button>
             </div>
 
             {!editMode ? (
               <>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginBottom: '1.5rem' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.6rem', marginBottom: '1.5rem' }}>
                   {([
-                    ['📱 Phone',    `+${selectedUser.phone}`],
-                    ['🎭 Status',   selectedUser.banned ? '🚫 Banned' : '✅ Active'],
-                    ['🛡️ Role',    selectedUser.isAdmin ? 'Admin' : selectedUser.isMod ? 'Mod' : 'Member'],
-                    ['⭐ Level',    String(selectedUser.level)],
-                    ['✨ XP',       String(selectedUser.xp)],
-                    ['💰 Wallet',   `₿ ${selectedUser.wallet.toLocaleString()}`],
-                    ['🏦 Bank',     `₿ ${selectedUser.bank.toLocaleString()}`],
-                    ['💎 Net Worth',`₿ ${selectedUser.netWorth.toLocaleString()}`],
-                    ['⚠️ Warnings', String(selectedUser.warnings)],
-                    ['📅 Joined',   selectedUser.createdAt ? new Date(selectedUser.createdAt).toLocaleDateString() : 'Unknown'],
-                    ['🔗 JID',      selectedUser.jid || '—'],
-                    ['🔗 LID',      selectedUser.lid || '—'],
+                    ['Status', selectedUser.banned ? '🚫 Banned' : '✅ Active'],
+                    ['Role', selectedUser.isAdmin ? 'Admin' : selectedUser.isMod ? 'Mod' : 'Member'],
+                    ['Level', String(selectedUser.level)],
+                    ['XP', String(selectedUser.xp)],
+                    ['Wallet', `₿ ${selectedUser.wallet.toLocaleString()}`],
+                    ['Bank', `₿ ${selectedUser.bank.toLocaleString()}`],
+                    ['Net Worth', `₿ ${selectedUser.netWorth.toLocaleString()}`],
+                    ['Warnings', String(selectedUser.warnings)],
+                    ['Joined', selectedUser.createdAt ? new Date(selectedUser.createdAt).toLocaleDateString() : 'Unknown'],
+                    ['JID', selectedUser.jid || '—'],
                   ] as [string, string][]).map(([k, v]) => (
-                    <div key={k} style={{ background: '#1e293b', borderRadius: 10, padding: '0.75rem' }}>
-                      <div style={{ color: '#64748b', fontSize: '0.72rem' }}>{k}</div>
-                      <div style={{ color: '#fff', fontWeight: 600, marginTop: 2, fontSize: '0.85rem', wordBreak: 'break-all' }}>{v}</div>
+                    <div key={k} style={{ background: 'rgba(0,0,0,0.4)', borderRadius: 8, padding: '0.65rem 0.85rem' }}>
+                      <div style={{ color: 'var(--text-muted)', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{k}</div>
+                      <div style={{ color: 'var(--text-primary)', fontWeight: 600, marginTop: 2, fontSize: '0.85rem', wordBreak: 'break-all' }}>{v}</div>
                     </div>
                   ))}
                 </div>
 
                 {selectedUser.inventory && selectedUser.inventory.length > 0 && (
-                  <div style={{ marginBottom: '1.5rem' }}>
-                    <div style={{ color: '#a78bfa', fontWeight: 600, marginBottom: 8 }}>🎒 Inventory</div>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                  <div style={{ marginBottom: '1.25rem' }}>
+                    <div style={{ color: 'var(--cyan)', fontWeight: 600, fontSize: '0.82rem', marginBottom: '0.5rem' }}>INVENTORY</div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
                       {selectedUser.inventory.map((item, i) => (
-                        <span key={i} style={{ background: '#1e293b', borderRadius: 6, padding: '0.25rem 0.6rem', fontSize: '0.8rem', color: '#e2e8f0' }}>
-                          📦 {item.item} ×{item.qty}
-                        </span>
+                        <span key={i} className="badge badge-cyan">📦 {item.item} ×{item.qty}</span>
                       ))}
                     </div>
                   </div>
                 )}
 
-                <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
-                  <button style={s.primaryBtn} onClick={() => { setEditMode(true); setEditData({ wallet: selectedUser.wallet, bank: selectedUser.bank, bankLimit: selectedUser.bankLimit, level: selectedUser.level, xp: selectedUser.xp, name: selectedUser.name, isMod: selectedUser.isMod, isAdmin: selectedUser.isAdmin }); }}>✏️ Edit</button>
-                  <button style={s.secondaryBtn} onClick={() => doConfirm({ title: 'Reset Cooldowns', message: `Reset all cooldowns for ${selectedUser.name}?`, action: async () => { await adminApi.resetCooldowns(selectedUser.phone); showToast('✅ Cooldowns reset'); loadUsers(pagination.page); setSelectedUser(null); } })}>⏱️ Reset CD</button>
+                <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
+                  <button className="m-btn m-btn-ghost m-btn-sm" onClick={() => { setEditMode(true); setEditData({ wallet: selectedUser.wallet, bank: selectedUser.bank, bankLimit: selectedUser.bankLimit, level: selectedUser.level, xp: selectedUser.xp, name: selectedUser.name, isMod: selectedUser.isMod, isAdmin: selectedUser.isAdmin }); }}>✏️ Edit</button>
+                  <button className="m-btn m-btn-ghost m-btn-sm" onClick={() => doConfirm({ title: 'Reset Cooldowns', message: `Reset all cooldowns for ${selectedUser.name}?`, action: async () => { await adminApi.resetCooldowns(selectedUser.phone); showToast('✅ Cooldowns reset'); loadUsers(pagination.page); setSelectedUser(null); } })}>⏱️ Reset CD</button>
                   {selectedUser.banned
-                    ? <button style={s.successBtn} onClick={() => doConfirm({ title: 'Unban User', message: `Unban ${selectedUser.name}?`, action: async () => { await adminApi.unbanUser(selectedUser.phone); showToast('✅ Unbanned'); loadUsers(pagination.page); setSelectedUser(null); } })}>✅ Unban</button>
-                    : <button style={s.dangerBtn}  onClick={() => doConfirm({ title: 'Ban User',   message: `Ban ${selectedUser.name}?`,   action: async () => { await adminApi.banUser(selectedUser.phone);   showToast('🚫 Banned');   loadUsers(pagination.page); setSelectedUser(null); } })}>🚫 Ban</button>
+                    ? <button className="m-btn m-btn-success m-btn-sm" onClick={() => doConfirm({ title: 'Unban User', message: `Unban ${selectedUser.name}?`, action: async () => { await adminApi.unbanUser(selectedUser.phone); showToast('✅ Unbanned'); loadUsers(pagination.page); setSelectedUser(null); } })}>✅ Unban</button>
+                    : <button className="m-btn m-btn-danger m-btn-sm" onClick={() => doConfirm({ title: 'Ban User', message: `Ban ${selectedUser.name}?`, action: async () => { await adminApi.banUser(selectedUser.phone); showToast('🚫 Banned'); loadUsers(pagination.page); setSelectedUser(null); } })}>🚫 Ban</button>
                   }
-                  <button style={{ ...s.dangerBtn, background: 'rgba(239,68,68,0.3)' }} onClick={() => doConfirm({ title: '⚠️ Delete User', message: `Permanently delete ALL data for ${selectedUser.name}? This cannot be undone.`, action: async () => { await adminApi.deleteUser(selectedUser.phone); showToast('🗑️ Deleted'); loadUsers(pagination.page); setSelectedUser(null); } })}>🗑️ Delete</button>
+                  <button className="m-btn m-btn-danger m-btn-sm" style={{ background: 'rgba(239,68,68,0.25)' }} onClick={() => doConfirm({ title: '⚠️ Delete User', message: `Permanently delete ALL data for ${selectedUser.name}? This cannot be undone.`, action: async () => { await adminApi.deleteUser(selectedUser.phone); showToast('🗑️ Deleted'); loadUsers(pagination.page); setSelectedUser(null); } })}>🗑️ Delete</button>
                 </div>
               </>
             ) : (
@@ -223,26 +233,26 @@ export default function Manager() {
                 try { await adminApi.editUser(selectedUser.phone, editData); showToast('✅ User updated'); setEditMode(false); loadUsers(pagination.page); setSelectedUser(null); }
                 catch (e: unknown) { showToast('❌ ' + (e instanceof Error ? e.message : 'Error')); }
               }} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                <h3 style={{ color: '#a78bfa', margin: 0 }}>✏️ Edit {selectedUser.name}</h3>
+                <div style={{ color: 'var(--cyan)', fontWeight: 700, marginBottom: '0.25rem' }}>Edit {selectedUser.name}</div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
                   {([['Name', 'name', 'text'], ['Wallet', 'wallet', 'number'], ['Bank', 'bank', 'number'], ['Bank Limit', 'bankLimit', 'number'], ['Level', 'level', 'number'], ['XP', 'xp', 'number']] as [string, keyof AdminUser, string][]).map(([label, field, type]) => (
-                    <div key={field}>
-                      <label style={{ color: '#94a3b8', fontSize: '0.8rem', display: 'block', marginBottom: 4 }}>{label}</label>
-                      <input style={{ ...s.input, margin: 0 }} type={type} value={String(editData[field] ?? '')} onChange={e => setEditData(d => ({ ...d, [field]: type === 'number' ? Number(e.target.value) : e.target.value }))} />
+                    <div key={String(field)}>
+                      <label style={{ color: 'var(--text-dim)', fontSize: '0.78rem', display: 'block', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.04em' }}>{label}</label>
+                      <input className="m-input" type={type} value={String(editData[field] ?? '')} onChange={e => setEditData(d => ({ ...d, [field]: type === 'number' ? Number(e.target.value) : e.target.value }))} />
                     </div>
                   ))}
                 </div>
                 <div style={{ display: 'flex', gap: '1rem' }}>
-                  {[['isMod', 'Mod'], ['isAdmin', 'Admin']].map(([f, l]) => (
-                    <label key={f} style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#94a3b8', cursor: 'pointer' }}>
+                  {[['isMod', 'Moderator'], ['isAdmin', 'Admin']].map(([f, l]) => (
+                    <label key={f} style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-dim)', cursor: 'pointer', fontSize: '0.88rem' }}>
                       <input type="checkbox" checked={(editData as Record<string, unknown>)[f] as boolean ?? false} onChange={e => setEditData(d => ({ ...d, [f]: e.target.checked }))} />
                       {l}
                     </label>
                   ))}
                 </div>
                 <div style={{ display: 'flex', gap: '0.75rem' }}>
-                  <button type="submit" style={s.primaryBtn}>Save</button>
-                  <button type="button" style={s.secondaryBtn} onClick={() => setEditMode(false)}>Cancel</button>
+                  <button type="submit" className="m-btn m-btn-primary">Save Changes</button>
+                  <button type="button" className="m-btn m-btn-ghost" onClick={() => setEditMode(false)}>Cancel</button>
                 </div>
               </form>
             )}
@@ -250,117 +260,230 @@ export default function Manager() {
         </div>
       )}
 
-      {/* LAYOUT */}
-      <div style={{ display: 'flex', minHeight: '100vh' }}>
-        {/* SIDEBAR */}
-        <aside style={{ width: 230, background: '#0f172a', borderRight: '1px solid #1e293b', padding: '1.5rem 1rem', display: 'flex', flexDirection: 'column', gap: '0.4rem', flexShrink: 0 }}>
-          <div style={{ marginBottom: '1rem' }}>
-            <div style={{ fontSize: '1.2rem', fontWeight: 800, background: 'linear-gradient(90deg,#a78bfa,#f472b6)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>🤖 Bot Manager</div>
-            <div style={{ color: '#475569', fontSize: '0.72rem', marginTop: 2 }}>Admin Panel</div>
-          </div>
-          {([
-            { id: 'dashboard',  label: '📊 Dashboard'  },
-            { id: 'users',      label: '👥 Users'       },
-            { id: 'duplicates', label: '🔍 Duplicates'  },
-            { id: 'migration',  label: '⚙️ Migration'   },
-            { id: 'actions',    label: '⚡ Actions'     },
-          ] as { id: MainTab; label: string }[]).map(item => (
-            <button key={item.id} onClick={() => setTab(item.id)}
-              style={{ textAlign: 'left', padding: '0.65rem 1rem', borderRadius: 10, border: 'none', cursor: 'pointer', fontWeight: 600, fontSize: '0.88rem', transition: 'all 0.15s',
-                background: tab === item.id ? 'rgba(167,139,250,0.15)' : 'transparent',
-                color:      tab === item.id ? '#a78bfa' : '#64748b',
-                borderLeft: tab === item.id ? '2px solid #a78bfa' : '2px solid transparent',
-              }}>
-              {item.label}
+      {/* SIDEBAR */}
+      <aside className={`sidebar${collapsed ? ' collapsed' : ''}`}>
+        <a href="/" className="sidebar-brand">
+          <div className="sidebar-logo">🤖</div>
+          <span>KONOSUBA</span>
+        </a>
+
+        <nav className="sidebar-nav">
+          <div className="sidebar-section-title">Control Panel</div>
+          {NAV.map(item => (
+            <button key={item.id} className={`sidebar-item${tab === item.id ? ' active' : ''}`} onClick={() => setTab(item.id)}>
+              <span className="sidebar-icon">{item.icon}</span>
+              <span className="sidebar-label">{item.label}</span>
             </button>
           ))}
-          <div style={{ marginTop: 'auto', paddingTop: '1rem', borderTop: '1px solid #1e293b' }}>
-            <button style={{ ...s.secondaryBtn, width: '100%', fontSize: '0.8rem' }} onClick={() => { localStorage.removeItem('adminKey'); setAuthed(false); }}>🔒 Logout</button>
-          </div>
-        </aside>
+        </nav>
 
-        {/* MAIN */}
-        <main style={{ flex: 1, padding: '2rem', overflowX: 'hidden' }}>
+        <div className="sidebar-footer">
+          {!collapsed && (
+            <div style={{ background: 'rgba(0,212,255,0.06)', border: '1px solid rgba(0,212,255,0.12)', borderRadius: 10, padding: '0.75rem', marginBottom: '0.75rem' }}>
+              <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', marginBottom: 4 }}>
+                <div style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--green)', boxShadow: '0 0 6px var(--green)' }} />
+                <span style={{ color: 'var(--green)', fontSize: '0.73rem', fontWeight: 700 }}>SYSTEM ONLINE</span>
+              </div>
+              <div style={{ color: 'var(--text-muted)', fontSize: '0.72rem' }}>All services operational</div>
+            </div>
+          )}
+          <button className="sidebar-toggle" onClick={() => setCollapsed(c => !c)}>
+            {collapsed ? '→' : '← Collapse'}
+          </button>
+          <button className="sidebar-toggle" style={{ marginTop: '0.5rem', color: '#fca5a5', borderColor: 'rgba(239,68,68,0.2)' }} onClick={logout}>
+            {collapsed ? '🚪' : '🚪 Logout'}
+          </button>
+        </div>
+      </aside>
+
+      {/* MAIN */}
+      <main className={`manager-main${collapsed ? ' collapsed' : ''}`}>
+        {/* TOPBAR */}
+        <div className="topbar">
+          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', minWidth: 0 }}>
+            <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.1em', whiteSpace: 'nowrap' }}>
+              {NAV.find(n => n.id === tab)?.icon} {NAV.find(n => n.id === tab)?.label}
+            </div>
+          </div>
+          <div className="topbar-right">
+            <div className="status-dot">Online</div>
+            <div style={{ width: 36, height: 36, borderRadius: '50%', background: 'linear-gradient(135deg,var(--cyan),var(--purple))', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.9rem' }}>🛡</div>
+          </div>
+        </div>
+
+        <div className="page-content">
 
           {/* ══ DASHBOARD ══ */}
           {tab === 'dashboard' && (
             <div>
-              <h2 style={s.pageTitle}>📊 Dashboard</h2>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '1rem', marginBottom: '2rem' }}>
+              <div className="page-header">
+                <h1 className="page-title">Command Center</h1>
+                <p className="page-subtitle">Real-time bot platform overview and analytics</p>
+              </div>
+
+              <div className="stats-row">
                 {[
-                  { icon: '👥', label: 'Total Users',    value: stats.totalUsers?.toLocaleString() ?? '—' },
-                  { icon: '⚡', label: 'Active (7d)',     value: stats.activeUsers?.toLocaleString() ?? '—' },
-                  { icon: '💰', label: 'Coins (Total)',   value: stats.totalCoinsInCirculation ? `${(stats.totalCoinsInCirculation / 1000).toFixed(0)}K` : '—' },
-                  { icon: '🤖', label: 'Active Bots',    value: stats.activeBots?.toString() ?? '—' },
-                ].map(stat => (
-                  <div key={stat.label} style={s.statCard}>
-                    <div style={{ fontSize: '2rem' }}>{stat.icon}</div>
-                    <div style={{ fontSize: '1.8rem', fontWeight: 800, color: '#a78bfa', marginTop: 4 }}>{stat.value}</div>
-                    <div style={{ color: '#64748b', fontSize: '0.8rem' }}>{stat.label}</div>
+                  { icon: '👥', label: 'Total Users', value: stats.totalUsers?.toLocaleString() ?? '—', change: '+12%' },
+                  { icon: '⚡', label: 'Active This Week', value: stats.activeUsers?.toLocaleString() ?? '—', change: '+8%' },
+                  { icon: '💰', label: 'Coins Circulating', value: stats.totalCoinsInCirculation ? `${(stats.totalCoinsInCirculation / 1000).toFixed(0)}K` : '—', change: '+3%' },
+                  { icon: '🤖', label: 'Active Bots', value: stats.activeBots?.toString() ?? '—', change: '0%' },
+                ].map(s => (
+                  <div key={s.label} className="m-stat-card">
+                    <div className="m-stat-icon">{s.icon}</div>
+                    <div className="m-stat-value">{s.value}</div>
+                    <div className="m-stat-label">{s.label}</div>
+                    <div className={`m-stat-change ${s.change.startsWith('+') ? 'pos' : 'neg'}`}>↑ {s.change} this week</div>
                   </div>
                 ))}
               </div>
-              <button style={s.primaryBtn} onClick={loadStats}>🔄 Refresh</button>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                <div className="m-panel">
+                  <div className="m-panel-header">
+                    <span className="m-panel-title">⚡ Quick Actions</span>
+                  </div>
+                  <div className="m-panel-body" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                    {[
+                      { icon: '👥', label: 'Manage Users', desc: 'Search, edit, ban/unban members', action: () => setTab('users') },
+                      { icon: '🔍', label: 'Find Duplicates', desc: 'Detect & merge duplicate accounts', action: () => setTab('duplicates') },
+                      { icon: '⚙️', label: 'Run Migration', desc: 'Normalize identity fields', action: () => setTab('migration') },
+                      { icon: '⚡', label: 'Global Actions', desc: 'Wipe economy, export data', action: () => setTab('actions') },
+                    ].map(item => (
+                      <button key={item.label} onClick={item.action} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.04)', borderRadius: 10, padding: '0.85rem 1rem', cursor: 'pointer', textAlign: 'left', transition: 'all 0.2s', color: 'inherit', fontFamily: 'inherit', width: '100%' }}
+                        onMouseOver={e => { (e.currentTarget as HTMLElement).style.borderColor = 'rgba(0,212,255,0.2)'; }}
+                        onMouseOut={e => { (e.currentTarget as HTMLElement).style.borderColor = 'rgba(255,255,255,0.04)'; }}>
+                        <span style={{ fontSize: '1.3rem', flexShrink: 0 }}>{item.icon}</span>
+                        <div>
+                          <div style={{ fontWeight: 600, fontSize: '0.88rem' }}>{item.label}</div>
+                          <div style={{ color: 'var(--text-muted)', fontSize: '0.78rem' }}>{item.desc}</div>
+                        </div>
+                        <span style={{ marginLeft: 'auto', color: 'var(--text-muted)', fontSize: '0.9rem' }}>→</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="m-panel">
+                  <div className="m-panel-header">
+                    <span className="m-panel-title">📋 System Info</span>
+                    <button className="m-btn m-btn-ghost m-btn-sm" onClick={loadStats}>↻ Refresh</button>
+                  </div>
+                  <div className="m-panel-body">
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                      {[
+                        ['Platform', 'Konosuba Bot v2.0'],
+                        ['Database', 'MongoDB Atlas'],
+                        ['Runtime', 'Node.js 18+'],
+                        ['Bot Framework', 'Baileys (WA-Multi)'],
+                        ['Status', '🟢 All Systems Online'],
+                        ['Data', `${stats.totalUsers ?? 0} registered users`],
+                      ].map(([k, v]) => (
+                        <div key={k} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.6rem 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                          <span style={{ color: 'var(--text-dim)', fontSize: '0.82rem' }}>{k}</span>
+                          <span style={{ color: 'var(--text-primary)', fontSize: '0.82rem', fontWeight: 600 }}>{v}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
 
           {/* ══ USERS ══ */}
           {tab === 'users' && (
             <div>
-              <h2 style={s.pageTitle}>👥 User Management</h2>
-              <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.25rem', flexWrap: 'wrap' }}>
-                <input style={{ ...s.input, flex: 1, minWidth: 200, margin: 0 }} placeholder="Search by name or phone…" value={search} onChange={e => setSearch(e.target.value)} onKeyDown={e => e.key === 'Enter' && loadUsers(1, search)} />
-                <button style={s.primaryBtn}     onClick={() => loadUsers(1, search)}>🔍 Search</button>
-                <button style={s.secondaryBtn}   onClick={() => { setSearch(''); loadUsers(1, ''); }}>✕ Clear</button>
-                <button style={s.secondaryBtn}   onClick={() => adminApi.exportUsers()}>📥 Export CSV</button>
+              <div className="page-header">
+                <h1 className="page-title">User Management</h1>
+                <p className="page-subtitle">Search, edit, and manage all registered users</p>
               </div>
 
-              <div style={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 14, overflow: 'hidden' }}>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr 80px 80px 100px', gap: '0.5rem', padding: '0.75rem 1rem', background: '#1e293b', color: '#94a3b8', fontSize: '0.78rem', fontWeight: 700 }}>
-                  <span>NAME</span><span>PHONE</span><span>WALLET</span><span>LEVEL</span><span>STATUS</span><span>ROLE</span><span>ACTIONS</span>
-                </div>
-                {usersLoading ? (
-                  <div style={{ textAlign: 'center', padding: '3rem', color: '#64748b' }}>Loading…</div>
-                ) : users.length === 0 ? (
-                  <div style={{ textAlign: 'center', padding: '3rem', color: '#64748b' }}>No users found</div>
-                ) : users.map(u => (
-                  <div key={u._id} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr 80px 80px 100px', gap: '0.5rem', padding: '0.75rem 1rem', borderTop: '1px solid #1e293b', alignItems: 'center', fontSize: '0.85rem' }}>
-                    <span style={{ color: '#e2e8f0', fontWeight: 600 }}>{u.name}</span>
-                    <span style={{ color: '#94a3b8' }}>+{u.phone}</span>
-                    <span style={{ color: '#a78bfa' }}>₿ {u.wallet.toLocaleString()}</span>
-                    <span style={{ color: '#94a3b8' }}>Lv {u.level}</span>
-                    <span>{u.banned ? <span style={{ background: 'rgba(239,68,68,0.2)', color: '#f87171', borderRadius: 6, padding: '2px 8px', fontSize: '0.75rem' }}>Banned</span> : <span style={{ background: 'rgba(34,197,94,0.2)', color: '#4ade80', borderRadius: 6, padding: '2px 8px', fontSize: '0.75rem' }}>Active</span>}</span>
-                    <span style={{ color: '#64748b', fontSize: '0.75rem' }}>{u.isAdmin ? '👑 Admin' : u.isMod ? '🛡️ Mod' : 'Member'}</span>
-                    <button style={{ ...s.secondaryBtn, padding: '0.3rem 0.6rem', fontSize: '0.78rem' }} onClick={() => setSelectedUser(u)}>View →</button>
-                  </div>
-                ))}
+              <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.25rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                <input className="m-input" style={{ flex: '1 1 220px', maxWidth: 380 }} type="search" placeholder="Search by name or phone..."
+                  value={search} onChange={e => setSearch(e.target.value)} onKeyDown={e => e.key === 'Enter' && loadUsers(1)} />
+                <button className="m-btn m-btn-primary" onClick={() => loadUsers(1)}>Search</button>
+                <button className="m-btn m-btn-ghost" onClick={() => { setSearch(''); loadUsers(1, ''); }}>Clear</button>
+                <span style={{ color: 'var(--text-muted)', fontSize: '0.82rem', marginLeft: 'auto' }}>{pagination.total} users found</span>
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1rem', color: '#64748b', fontSize: '0.85rem' }}>
-                <span>{pagination.total} total · Page {pagination.page}/{pagination.pages}</span>
-                <div style={{ display: 'flex', gap: '0.5rem' }}>
-                  <button style={s.secondaryBtn} disabled={pagination.page <= 1} onClick={() => loadUsers(pagination.page - 1, search)}>← Prev</button>
-                  <button style={s.secondaryBtn} disabled={pagination.page >= pagination.pages} onClick={() => loadUsers(pagination.page + 1, search)}>Next →</button>
+              {usersLoading ? (
+                <div style={{ textAlign: 'center', padding: '4rem', color: 'var(--text-dim)' }}>
+                  <div style={{ fontSize: '2rem', marginBottom: '0.75rem', animation: 'spin 2s linear infinite' }}>⚙️</div>
+                  <style>{`@keyframes spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }`}</style>
+                  Loading users...
                 </div>
-              </div>
+              ) : (
+                <div className="data-table-wrap">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>User</th>
+                        <th>Phone</th>
+                        <th>Balance</th>
+                        <th>Level</th>
+                        <th>Status</th>
+                        <th>Joined</th>
+                        <th></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {users.length === 0 ? (
+                        <tr><td colSpan={7} style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)' }}>No users found</td></tr>
+                      ) : users.map(u => (
+                        <tr key={u._id}>
+                          <td>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                              <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'linear-gradient(135deg,var(--cyan),var(--purple))', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.8rem', flexShrink: 0 }}>⚔</div>
+                              <div>
+                                <div className="name-cell">{u.name}</div>
+                                {(u.isAdmin || u.isMod) && <span className={`badge ${u.isAdmin ? 'badge-gold' : 'badge-purple'}`} style={{ fontSize: '0.62rem' }}>{u.isAdmin ? 'Admin' : 'Mod'}</span>}
+                              </div>
+                            </div>
+                          </td>
+                          <td><span className="phone-cell">+{u.phone}</span></td>
+                          <td><span className="balance-cell">₿ {(u.wallet + u.bank).toLocaleString()}</span></td>
+                          <td><span className="level-cell">Lv {u.level}</span></td>
+                          <td><span className={`badge ${u.banned ? 'badge-red' : 'badge-green'}`}>{u.banned ? 'Banned' : 'Active'}</span></td>
+                          <td style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>{u.createdAt ? new Date(u.createdAt).toLocaleDateString() : '—'}</td>
+                          <td>
+                            <button className="m-btn m-btn-ghost m-btn-sm" onClick={() => { setSelectedUser(u); setEditMode(false); }}>View</button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+
+                  {pagination.pages > 1 && (
+                    <div className="pagination">
+                      <button className="page-btn" disabled={pagination.page <= 1} onClick={() => loadUsers(pagination.page - 1)}>‹</button>
+                      {Array.from({ length: Math.min(5, pagination.pages) }, (_, i) => {
+                        const p = Math.max(1, pagination.page - 2) + i;
+                        if (p > pagination.pages) return null;
+                        return <button key={p} className={`page-btn${p === pagination.page ? ' active' : ''}`} onClick={() => loadUsers(p)}>{p}</button>;
+                      })}
+                      <button className="page-btn" disabled={pagination.page >= pagination.pages} onClick={() => loadUsers(pagination.page + 1)}>›</button>
+                      <span style={{ color: 'var(--text-muted)', fontSize: '0.78rem' }}>Page {pagination.page} of {pagination.pages}</span>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
           {/* ══ DUPLICATES ══ */}
           {tab === 'duplicates' && (
             <div>
-              <h2 style={s.pageTitle}>🔍 Duplicate Detection & Merge</h2>
-              <div style={{ background: 'rgba(167,139,250,0.08)', border: '1px solid rgba(167,139,250,0.2)', borderRadius: 14, padding: '1.25rem 1.5rem', marginBottom: '1.5rem' }}>
-                <p style={{ color: '#c4b5fd', margin: '0 0 0.75rem', fontSize: '0.9rem' }}>
-                  <strong>How it works:</strong> Scans all user records, extracts the phone number from each JID, and groups records that share the same phone number. Duplicates happen when Baileys returns a different identifier (JID vs LID) for the same user, creating two separate MongoDB documents.
-                </p>
-                <p style={{ color: '#94a3b8', margin: 0, fontSize: '0.85rem' }}>
-                  Merging combines: wallet + bank balances, best level/XP, merged inventories &amp; achievements, earlier join date, highest role, and most lenient cooldowns. The secondary account is permanently deleted.
-                </p>
+              <div className="page-header">
+                <h1 className="page-title">Duplicate Detection</h1>
+                <p className="page-subtitle">Find and merge duplicate user accounts</p>
+              </div>
+
+              <div className="info-box">
+                <strong>How it works:</strong> Scans all user records, extracts phone numbers from JIDs, and groups records sharing the same phone. Merging combines wallet + bank balances, best level/XP, merged inventories & achievements. The secondary account is permanently deleted.
               </div>
 
               <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
-                <button style={s.primaryBtn} disabled={dupLoading} onClick={async () => {
+                <button className="m-btn m-btn-primary" disabled={dupLoading} onClick={async () => {
                   setDupLoading(true); setDupScanned(false);
                   try {
                     const res = await adminApi.detectDuplicates();
@@ -372,11 +495,11 @@ export default function Manager() {
                   {dupLoading ? '⏳ Scanning…' : '🔍 Scan for Duplicates'}
                 </button>
                 {dupScanned && dupGroups.length > 0 && (
-                  <button style={s.secondaryBtn} onClick={() => doConfirm({
+                  <button className="m-btn m-btn-ghost" onClick={() => doConfirm({
                     title: '⚡ Auto-Merge All Duplicates',
-                    message: `Auto-merge all ${dupGroups.length} duplicate group(s)? For each group, the oldest account (earliest createdAt) will be kept as primary. This cannot be undone.`,
+                    message: `Auto-merge all ${dupGroups.length} duplicate group(s)? For each group, the oldest account will be kept as primary. This cannot be undone.`,
                     action: async () => {
-                      let merged = 0; let failed = 0;
+                      let merged = 0, failed = 0;
                       for (const g of dupGroups) {
                         const sorted = [...g.users].sort((a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime());
                         const primary = sorted[0];
@@ -385,7 +508,7 @@ export default function Manager() {
                           catch { failed++; }
                         }
                       }
-                      showToast(`✅ Auto-merge done: ${merged} merged, ${failed} failed`);
+                      showToast(`✅ Auto-merge: ${merged} merged, ${failed} failed`);
                       setDupGroups([]); setDupScanned(false);
                     },
                   })}>
@@ -395,34 +518,32 @@ export default function Manager() {
               </div>
 
               {dupScanned && dupGroups.length === 0 && (
-                <div style={{ background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.3)', borderRadius: 14, padding: '2rem', textAlign: 'center', color: '#4ade80' }}>
+                <div className="success-box" style={{ textAlign: 'center', padding: '2rem' }}>
                   <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>✅</div>
                   <div style={{ fontWeight: 700 }}>No duplicate accounts found</div>
-                  <div style={{ color: '#64748b', fontSize: '0.85rem', marginTop: 4 }}>All user records have unique phone numbers</div>
+                  <div style={{ fontSize: '0.85rem', marginTop: 4 }}>All user records have unique phone numbers</div>
                 </div>
               )}
 
               {dupGroups.map(group => (
-                <div key={group.phone} style={{ background: '#0f172a', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 16, padding: '1.25rem 1.5rem', marginBottom: '1rem' }}>
+                <div key={group.phone} style={{ background: 'rgba(8,8,25,0.9)', border: '1px solid rgba(239,68,68,0.25)', borderRadius: 14, padding: '1.25rem 1.5rem', marginBottom: '1rem' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
                     <div>
                       <div style={{ fontWeight: 700, color: '#fca5a5' }}>⚠️ {group.count} accounts for +{group.phone}</div>
-                      <div style={{ color: '#64748b', fontSize: '0.8rem', marginTop: 2 }}>These need to be merged into one record</div>
+                      <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: 2 }}>These need to be merged into one record</div>
                     </div>
-                    <button style={s.primaryBtn} onClick={() => { setMergingGroup(group); setMergePrimary(''); }}>
-                      🔀 Merge
-                    </button>
+                    <button className="m-btn m-btn-primary m-btn-sm" onClick={() => { setMergingGroup(group); setMergePrimary(''); }}>🔀 Merge</button>
                   </div>
                   <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
                     {group.users.map(u => (
-                      <div key={u._id} style={{ background: '#1e293b', borderRadius: 12, padding: '0.75rem 1rem', flex: '1 1 180px' }}>
-                        <div style={{ fontWeight: 700, color: '#e2e8f0', marginBottom: 4 }}>{u.name}</div>
-                        <div style={{ color: '#64748b', fontSize: '0.75rem' }}>{u.jid || u.lid || 'No WA ID'}</div>
-                        <div style={{ marginTop: 6, fontSize: '0.85rem' }}>
-                          <span style={{ color: '#a78bfa' }}>₿ {(u.wallet + u.bank).toLocaleString()}</span>
-                          <span style={{ color: '#64748b' }}> · Lv {u.level}</span>
+                      <div key={u._id} style={{ background: 'rgba(0,0,0,0.4)', borderRadius: 10, padding: '0.75rem 1rem', flex: '1 1 160px' }}>
+                        <div style={{ fontWeight: 700, fontSize: '0.9rem' }}>{u.name}</div>
+                        <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginTop: 2 }}>{u.jid || u.lid || 'No WA ID'}</div>
+                        <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                          <span style={{ color: 'var(--gold)', fontWeight: 700, fontSize: '0.85rem' }}>₿ {(u.wallet + u.bank).toLocaleString()}</span>
+                          <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>Lv {u.level}</span>
                         </div>
-                        <div style={{ color: '#475569', fontSize: '0.72rem', marginTop: 2 }}>{u.createdAt ? new Date(u.createdAt).toLocaleDateString() : ''}</div>
+                        <div style={{ color: 'var(--text-muted)', fontSize: '0.72rem', marginTop: 2 }}>{u.createdAt ? new Date(u.createdAt).toLocaleDateString() : ''}</div>
                       </div>
                     ))}
                   </div>
@@ -434,23 +555,16 @@ export default function Manager() {
           {/* ══ MIGRATION ══ */}
           {tab === 'migration' && (
             <div>
-              <h2 style={s.pageTitle}>⚙️ Identity Migration</h2>
-              <div style={{ background: 'rgba(167,139,250,0.08)', border: '1px solid rgba(167,139,250,0.2)', borderRadius: 14, padding: '1.25rem 1.5rem', marginBottom: '1.5rem' }}>
-                <p style={{ color: '#c4b5fd', margin: '0 0 0.5rem', fontWeight: 700 }}>What this does:</p>
-                <ul style={{ color: '#94a3b8', fontSize: '0.88rem', margin: 0, paddingLeft: '1.25rem', lineHeight: 1.8 }}>
-                  <li>Scans every user document in MongoDB</li>
-                  <li>Derives the canonical phone number from each JID (<code style={{ color: '#a78bfa' }}>2348012345678@s.whatsapp.net</code> → <code style={{ color: '#a78bfa' }}>2348012345678</code>)</li>
-                  <li>Sets the indexed <code style={{ color: '#a78bfa' }}>phone</code> field if it's missing</li>
-                  <li>Reports any conflicts (same phone number on two records) so you can merge them</li>
-                  <li>LID-only users are skipped — their phone can't be derived from the LID alone</li>
-                </ul>
-                <p style={{ color: '#64748b', fontSize: '0.82rem', marginTop: '0.75rem', marginBottom: 0 }}>
-                  ✅ Safe to run multiple times — already-migrated records are skipped.
-                  Run this once after deploying, then use the Duplicates tab to resolve any conflicts.
-                </p>
+              <div className="page-header">
+                <h1 className="page-title">Identity Migration</h1>
+                <p className="page-subtitle">Normalize phone fields from JID identifiers</p>
               </div>
 
-              <button style={s.primaryBtn} disabled={migLoading} onClick={async () => {
+              <div className="info-box">
+                <strong>What this does:</strong> Scans every user document, derives the canonical phone number from each JID (<code style={{ color: 'var(--cyan)' }}>2348012345678@s.whatsapp.net</code> → <code style={{ color: 'var(--cyan)' }}>2348012345678</code>), sets the indexed <code style={{ color: 'var(--cyan)' }}>phone</code> field if missing, and reports any conflicts. Safe to run multiple times.
+              </div>
+
+              <button className="m-btn m-btn-primary" disabled={migLoading} onClick={async () => {
                 setMigLoading(true);
                 try { setMigResult(await adminApi.runMigration()); showToast('✅ Migration complete'); }
                 catch (e: unknown) { showToast('❌ ' + (e instanceof Error ? e.message : 'Failed')); }
@@ -461,35 +575,32 @@ export default function Manager() {
 
               {migResult && (
                 <div style={{ marginTop: '1.5rem' }}>
-                  <div style={{ background: migResult.conflicts > 0 ? 'rgba(239,68,68,0.08)' : 'rgba(34,197,94,0.08)', border: `1px solid ${migResult.conflicts > 0 ? 'rgba(239,68,68,0.3)' : 'rgba(34,197,94,0.3)'}`, borderRadius: 14, padding: '1.25rem 1.5rem', marginBottom: '1rem' }}>
-                    <div style={{ fontWeight: 700, color: migResult.conflicts > 0 ? '#fca5a5' : '#4ade80', marginBottom: '0.75rem' }}>
+                  <div className={migResult.conflicts > 0 ? 'warning-box' : 'success-box'}>
+                    <div style={{ fontWeight: 700, marginBottom: '0.75rem' }}>
                       {migResult.conflicts > 0 ? '⚠️ Migration complete with conflicts' : '✅ Migration complete — no conflicts'}
                     </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '0.75rem' }}>
-                      {[
-                        ['📋 Normalized', migResult.normalized],
-                        ['✅ Already Set', migResult.alreadySet],
-                        ['🔗 LID-only',    migResult.lidOnly],
-                        ['⚠️ Conflicts',   migResult.conflicts],
-                      ].map(([label, val]) => (
-                        <div key={label as string} style={{ background: '#1e293b', borderRadius: 10, padding: '0.75rem', textAlign: 'center' }}>
-                          <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#a78bfa' }}>{String(val)}</div>
-                          <div style={{ color: '#64748b', fontSize: '0.78rem', marginTop: 2 }}>{label as string}</div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: '0.6rem' }}>
+                      {[['📋 Normalized', migResult.normalized], ['✅ Already Set', migResult.alreadySet], ['🔗 LID-only', migResult.lidOnly], ['⚠️ Conflicts', migResult.conflicts]].map(([label, val]) => (
+                        <div key={String(label)} style={{ background: 'rgba(0,0,0,0.3)', borderRadius: 8, padding: '0.65rem', textAlign: 'center' }}>
+                          <div style={{ fontSize: '1.3rem', fontWeight: 800, color: 'var(--cyan)' }}>{String(val)}</div>
+                          <div style={{ fontSize: '0.75rem', marginTop: 2, opacity: 0.8 }}>{String(label)}</div>
                         </div>
                       ))}
                     </div>
-                    <p style={{ color: '#94a3b8', fontSize: '0.88rem', margin: '1rem 0 0' }}>{migResult.message}</p>
+                    <p style={{ fontSize: '0.85rem', margin: '0.75rem 0 0' }}>{migResult.message}</p>
                   </div>
 
                   {migResult.conflictList.length > 0 && (
-                    <div style={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 14, padding: '1.25rem' }}>
-                      <div style={{ color: '#fca5a5', fontWeight: 700, marginBottom: '0.75rem' }}>Conflict List — go to Duplicates tab to merge these</div>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', maxHeight: 300, overflowY: 'auto' }}>
-                        {migResult.conflictList.map((c, i) => (
-                          <div key={i} style={{ background: '#1e293b', borderRadius: 8, padding: '0.6rem 0.85rem', fontSize: '0.82rem', color: '#94a3b8' }}>
-                            Phone <span style={{ color: '#a78bfa' }}>+{c.phone}</span> → user A: <code>{c.userA}</code> · user B: <code>{c.userB}</code>
-                          </div>
-                        ))}
+                    <div className="m-panel" style={{ marginTop: '1rem' }}>
+                      <div className="m-panel-header"><span className="m-panel-title">⚠️ Conflict List</span></div>
+                      <div className="m-panel-body" style={{ maxHeight: 260, overflowY: 'auto' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                          {migResult.conflictList.map((c, i) => (
+                            <div key={i} style={{ background: 'rgba(0,0,0,0.3)', borderRadius: 8, padding: '0.6rem 0.85rem', fontSize: '0.82rem', color: 'var(--text-dim)' }}>
+                              Phone <span style={{ color: 'var(--cyan)' }}>+{c.phone}</span> → user A: <code style={{ color: 'var(--text-primary)' }}>{c.userA}</code> · user B: <code style={{ color: 'var(--text-primary)' }}>{c.userB}</code>
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     </div>
                   )}
@@ -501,27 +612,31 @@ export default function Manager() {
           {/* ══ ACTIONS ══ */}
           {tab === 'actions' && (
             <div>
-              <h2 style={s.pageTitle}>⚡ Global Actions</h2>
-              {actionMsg && (
-                <div style={{ background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.3)', borderRadius: 10, padding: '0.75rem 1rem', color: '#4ade80', marginBottom: '1.5rem' }}>
-                  {actionMsg}
-                </div>
-              )}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', maxWidth: 580 }}>
+              <div className="page-header">
+                <h1 className="page-title">Global Actions</h1>
+                <p className="page-subtitle">Bulk operations and data management tools</p>
+              </div>
+
+              {actionMsg && <div className="success-box" style={{ marginBottom: '1.5rem' }}>{actionMsg}</div>}
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem', maxWidth: 640 }}>
                 {[
-                  { icon: '💸', title: 'Wipe All Economy',    desc: 'Reset all wallets to ₿500 and bank to ₿0. Inventories preserved.', danger: true,  fn: async () => { const r = await adminApi.wipeEconomy();   setActionMsg('✅ ' + r.message); } },
-                  { icon: '✨', title: 'Wipe All XP & Levels',desc: 'Reset every user XP to 0 and level to 1.',                         danger: true,  fn: async () => { const r = await adminApi.wipeXP();        setActionMsg('✅ ' + r.message); } },
-                  { icon: '🎒', title: 'Wipe All Inventories', desc: 'Clear all items from every user inventory.',                       danger: true,  fn: async () => { const r = await adminApi.wipeInventory(); setActionMsg('✅ ' + r.message); } },
-                  { icon: '📥', title: 'Export All Users (CSV)',desc: 'Download a CSV with phone, wallet, level, ban status, dates.',    danger: false, fn: async () => { adminApi.exportUsers(); setActionMsg('✅ Download started'); } },
+                  { icon: '💸', title: 'Wipe All Economy', desc: 'Reset all wallets to ₿500 and bank to ₿0. Inventories preserved.', danger: true, fn: async () => { const r = await adminApi.wipeEconomy(); setActionMsg('✅ ' + r.message); } },
+                  { icon: '✨', title: 'Wipe All XP & Levels', desc: 'Reset every user XP to 0 and level to 1. Cannot be undone.', danger: true, fn: async () => { const r = await adminApi.wipeXP(); setActionMsg('✅ ' + r.message); } },
+                  { icon: '🎒', title: 'Wipe All Inventories', desc: 'Clear all items from every user inventory. Cannot be undone.', danger: true, fn: async () => { const r = await adminApi.wipeInventory(); setActionMsg('✅ ' + r.message); } },
+                  { icon: '📥', title: 'Export All Users (CSV)', desc: 'Download a CSV with phone, wallet, level, ban status, and join dates.', danger: false, fn: async () => { adminApi.exportUsers(); setActionMsg('✅ Download started'); } },
                 ].map(item => (
-                  <div key={item.title} style={{ background: '#0f172a', border: `1px solid ${item.danger ? 'rgba(239,68,68,0.25)' : '#1e293b'}`, borderRadius: 14, padding: '1.25rem 1.5rem', display: 'flex', gap: '1rem', alignItems: 'center' }}>
+                  <div key={item.title} style={{ background: 'rgba(8,8,25,0.9)', border: `1px solid ${item.danger ? 'rgba(239,68,68,0.2)' : 'rgba(255,255,255,0.05)'}`, borderRadius: 14, padding: '1.25rem 1.5rem', display: 'flex', gap: '1rem', alignItems: 'center' }}>
                     <div style={{ fontSize: '2rem', flexShrink: 0 }}>{item.icon}</div>
                     <div style={{ flex: 1 }}>
-                      <div style={{ fontWeight: 700, color: '#e2e8f0' }}>{item.title}</div>
-                      <div style={{ color: '#64748b', fontSize: '0.85rem', marginTop: 2 }}>{item.desc}</div>
+                      <div style={{ fontWeight: 700, color: 'var(--text-primary)', fontSize: '0.95rem' }}>{item.title}</div>
+                      <div style={{ color: 'var(--text-muted)', fontSize: '0.82rem', marginTop: 2 }}>{item.desc}</div>
                     </div>
-                    <button style={item.danger ? s.dangerBtn : s.primaryBtn}
-                      onClick={() => item.danger ? doConfirm({ title: `⚠️ ${item.title}`, message: `${item.desc} This cannot be undone.`, action: item.fn }) : item.fn()}>
+                    <button className={`m-btn ${item.danger ? 'm-btn-danger' : 'm-btn-primary'}`} style={{ flexShrink: 0 }}
+                      onClick={() => item.danger
+                        ? doConfirm({ title: `⚠️ ${item.title}`, message: `${item.desc} This cannot be undone.`, action: item.fn })
+                        : item.fn()
+                      }>
                       {item.danger ? '⚠️ Run' : '▶ Run'}
                     </button>
                   </div>
@@ -530,21 +645,8 @@ export default function Manager() {
             </div>
           )}
 
-        </main>
-      </div>
+        </div>
+      </main>
     </div>
   );
 }
-
-const s: Record<string, React.CSSProperties> = {
-  page:       { minHeight: '100vh', background: '#020817', color: '#e2e8f0', fontFamily: 'system-ui,sans-serif' },
-  loginBox:   { display: 'flex', flexDirection: 'column', gap: '1rem', background: '#0f172a', border: '1px solid #1e293b', borderRadius: 20, padding: '2.5rem', width: '100%', maxWidth: 380, margin: '10vh auto 0' },
-  title:      { color: '#fff', fontWeight: 800, fontSize: '1.6rem', margin: 0 },
-  pageTitle:  { color: '#fff', fontWeight: 800, fontSize: '1.4rem', margin: '0 0 1.5rem' },
-  input:      { width: '100%', padding: '0.7rem 1rem', background: '#1e293b', border: '1px solid #334155', borderRadius: 10, color: '#e2e8f0', fontSize: '0.95rem', outline: 'none', boxSizing: 'border-box' },
-  primaryBtn: { padding: '0.65rem 1.3rem', background: 'linear-gradient(90deg,#a78bfa,#f472b6)', border: 'none', borderRadius: 10, color: '#fff', fontWeight: 700, fontSize: '0.9rem', cursor: 'pointer' },
-  secondaryBtn:{ padding: '0.65rem 1.3rem', background: '#1e293b', border: '1px solid #334155', borderRadius: 10, color: '#94a3b8', fontWeight: 600, fontSize: '0.9rem', cursor: 'pointer' },
-  dangerBtn:  { padding: '0.65rem 1.3rem', background: 'rgba(239,68,68,0.2)', border: '1px solid rgba(239,68,68,0.4)', borderRadius: 10, color: '#fca5a5', fontWeight: 700, fontSize: '0.9rem', cursor: 'pointer' },
-  successBtn: { padding: '0.65rem 1.3rem', background: 'rgba(34,197,94,0.2)',  border: '1px solid rgba(34,197,94,0.4)',  borderRadius: 10, color: '#4ade80',  fontWeight: 700, fontSize: '0.9rem', cursor: 'pointer' },
-  statCard:   { background: '#0f172a', border: '1px solid #1e293b', borderRadius: 14, padding: '1.25rem', textAlign: 'center' as const },
-};

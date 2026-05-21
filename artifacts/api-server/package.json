@@ -5,14 +5,13 @@
   "type": "commonjs",
   "scripts": {
     "start": "node server.js",
-    "dev":   "node server.js"
+    "dev": "node server.js"
   },
   "engines": { "node": ">=18" },
   "dependencies": {
-    "cors":        "^2.8.6",
-    "express":     "^4.21.2",
-    "jsonwebtoken":"^9.0.2",
-    "mongoose":    "^8.15.0",
-    "pino":        "^9.6.0"
+    "cors": "^2.8.6",
+    "express": "^4.21.2",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.15.0"
   }
 }
