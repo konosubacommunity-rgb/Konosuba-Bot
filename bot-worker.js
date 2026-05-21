@@ -125,11 +125,14 @@ async function startBot() {
   // requestPairingCode MUST be called before the connection opens.
   // Calling it inside connection === 'open' is too late and will fail.
   //
+  let pairingCodeSent = false;
+
   if (!hadCredentials && BOT_PHONE) {
     setTimeout(async () => {
       try {
         const code = await sock.requestPairingCode(BOT_PHONE.replace(/\D/g, ''));
         const formatted = code.match(/.{1,4}/g).join('-');
+        pairingCodeSent = true;
         console.log(`\n╔══════════════════════════════╗`);
         console.log(`║  PAIRING CODE: ${formatted}  ║`);
         console.log(`╚══════════════════════════════╝`);
@@ -137,7 +140,7 @@ async function startBot() {
       } catch (err) {
         console.error('Could not get pairing code:', err.message);
       }
-    }, 3000);
+    }, 3500);
   }
 
   let credsSavedThisSession = false;
@@ -155,9 +158,12 @@ async function startBot() {
         clearSession();
         reconnectAttempts = 0;
         setTimeout(startBot, 2000);
-      } else if (!hadCredentials && !credsSavedThisSession) {
+      } else if (!hadCredentials && !credsSavedThisSession && !pairingCodeSent) {
+        // Connection closed before pairing code was sent — don't loop
         return;
       } else {
+        // Reconnect: covers normal drops AND the mid-pairing handshake close
+        // that WhatsApp sends after the user enters the code (before creds.update).
         reconnectAttempts++;
         const delay = Math.min(3000 * reconnectAttempts, 15000);
         console.log(`Reconnecting in ${delay / 1000}s…`);

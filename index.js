@@ -222,6 +222,8 @@ async function startBot() {
   global.botSocket = sock;
 
   let credsSavedThisSession = false;
+  let pairingCodeSent = false;
+
   sock.ev.on('creds.update', () => {
     credsSavedThisSession = true;
     saveCreds();
@@ -251,9 +253,14 @@ async function startBot() {
           botSession.setStatus('disconnected').catch(console.error);
         }
         setTimeout(startBot, 2000);
-      } else if (!hadCredentials && !credsSavedThisSession) {
+      } else if (!hadCredentials && !credsSavedThisSession && !pairingCodeSent) {
+        // Connection closed before we even sent the pairing code — don't loop
         return;
       } else {
+        // Reconnect: covers both normal drops AND mid-pairing handshake drops.
+        // WhatsApp briefly closes the socket after the user enters the code
+        // (before creds.update fires). Without this reconnect the device shows
+        // "Couldn't link Device".
         reconnectAttempts++;
         const delay = Math.min(3000 * reconnectAttempts, 15000);
         console.log(`🔄 Reconnecting in ${delay / 1000}s…`);
@@ -285,13 +292,18 @@ async function startBot() {
 
   // Pairing code flow
   if (!hadCredentials && savedPhoneNumber) {
-    await new Promise(res => setTimeout(res, 1500));
+    // Wait 3500ms so the WebSocket handshake with WhatsApp's servers is fully
+    // complete before we call requestPairingCode. Too short a delay causes the
+    // pairing request to arrive before the socket is ready, which results in
+    // WhatsApp showing "Couldn't link Device" when the code is entered.
+    await new Promise(res => setTimeout(res, 3500));
     console.log(`\n🔑 Requesting pairing code for: +${savedPhoneNumber}`);
 
     const tryPair = async (attemptsLeft) => {
       try {
         const code      = await sock.requestPairingCode(savedPhoneNumber);
         const formatted = code.match(/.{1,4}/g).join('-');
+        pairingCodeSent = true;
         console.log('\n╔════════════════════════════╗');
         console.log(`║   PAIRING CODE: ${formatted.padEnd(12)}║`);
         console.log('╚════════════════════════════╝');
