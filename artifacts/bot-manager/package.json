@@ -1,5 +1,5 @@
 {
-  "name": "konosuba-bot-manager",
+  "name": "@workspace/bot-manager",
   "version": "0.0.0",
   "private": true,
   "type": "module",

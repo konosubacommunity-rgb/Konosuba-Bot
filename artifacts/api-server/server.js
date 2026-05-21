@@ -230,24 +230,51 @@ async function startBot(botId) {
           group:   groupJid ? groupJid.split('@')[0] : null
         });
 
-        // ── Website-first: only registered users can use commands ─────────────
-        let user = await User.findOne({ jid: sender });
-
-        if (!user || !user.registered) {
-          const phone = sender.split('@')[0];
-          const websiteUrl = process.env.WEBSITE_URL || 'https://your-konosuba-site.onrender.com';
-          await sock.sendMessage(dest, {
-            text: `👋 Hey *${message.pushName || phone}*!\n\nYou need to *register on the Konosuba website first* before you can use bot commands.\n\n🌐 *Sign up at:*\n${websiteUrl}\n\n📱 Use your WhatsApp number when signing up:\n*${phone}*\n\n> Once registered, all your wallet 💰, bank 🏦, level ⭐ and XP ⚡ will sync live between WhatsApp and the website!`,
-          }, { quoted: message });
-          continue;
+        // ── Resolve LID → phone JID using contacts map ────────────────────────
+        function resolvePhoneJid(rawSender) {
+          if (!rawSender.includes('@lid')) return rawSender;
+          const contacts = sock?.contacts || {};
+          for (const [jid, contact] of Object.entries(contacts)) {
+            if (jid.includes('@s.whatsapp.net') && contact?.lid === rawSender) return jid;
+          }
+          return rawSender;
+        }
+        function resolvePhone(rawSender) {
+          const jid = resolvePhoneJid(rawSender);
+          return jid.split('@')[0];
         }
 
-        if (user.name !== message.pushName && message.pushName) {
+        // ── User lookup: try phone JID first, fall back to LID field ──────────
+        const phoneJid = resolvePhoneJid(sender);
+        let user = await User.findByWhatsAppId(phoneJid);
+        if (!user && phoneJid !== sender) user = await User.findByWhatsAppId(sender);
+
+        // Save LID onto existing phone-keyed record so future lookups work
+        if (user && sender.includes('@lid') && !user.lid) {
+          user.lid = sender;
+          await user.save().catch(() => {});
+        }
+
+        // Commands that open users can run before registering
+        const OPEN_COMMANDS = ['reg', 'register', 'menu', 'ping'];
+
+        if (!user || !user.registered) {
+          if (!OPEN_COMMANDS.includes(command)) {
+            const phone = resolvePhone(sender);
+            const websiteUrl = process.env.WEBSITE_URL || 'https://konosuba-website.onrender.com';
+            await sock.sendMessage(dest, {
+              text: `👋 Hey *${message.pushName || phone}*!\n\nYou need to *register on the Konosuba website first* before you can use bot commands.\n\n🌐 *Sign up at:*\n${websiteUrl}\n\n📱 Use your WhatsApp number when signing up:\n*+${phone}*\n\n> Once registered, your wallet 💰, bank 🏦, level ⭐ and XP ⚡ will sync live between WhatsApp and the website!`,
+            }, { quoted: message });
+            continue;
+          }
+        }
+
+        if (user && user.name !== message.pushName && message.pushName) {
           user.name = message.pushName;
           await user.save();
         }
 
-        if (user.banned && !isOwner(sender)) {
+        if (user?.banned && !isOwner(sender)) {
           await sock.sendMessage(dest, { text: '*🚫 Access Denied*' }, { quoted: message });
           continue;
         }
@@ -258,18 +285,21 @@ async function startBot(botId) {
           if (group?.mutedMembers?.includes(sender)) continue;
         }
 
+        // Always use phone JID (not LID) when passing sender to command handlers
+        const effectiveSender = phoneJid;
+
         let handled = false;
-        handled = await handleGeneral(sock, message, command, args, sender, isGroup, groupJid);
-        if (!handled) handled = await handleAdmin(sock, message, command, args, sender, isGroup, groupJid);
-        if (!handled) handled = await handleEconomy(sock, message, command, args, sender, isGroup, groupJid);
-        if (!handled) handled = await handleGambling(sock, message, command, args, sender, isGroup, groupJid);
-        if (!handled) handled = await handleFun(sock, message, command, args, sender, isGroup, groupJid);
-        if (!handled) handled = await handleInteractions(sock, message, command, args, sender, isGroup, groupJid);
-        if (!handled) handled = await handleGames(sock, message, command, args, sender, isGroup, groupJid);
-        if (!handled) handled = await handlePokemon(sock, message, command, args, sender, isGroup, groupJid);
-        if (!handled) handled = await handleDownloader(sock, message, command, args, sender, isGroup, groupJid);
-        if (!handled) handled = await handleRpg(sock, message, command, args, sender, isGroup, groupJid);
-        if (!handled) handled = await handleGuild(sock, message, command, args, sender, isGroup, groupJid);
+        handled = await handleGeneral(sock, message, command, args, effectiveSender, isGroup, groupJid);
+        if (!handled) handled = await handleAdmin(sock, message, command, args, effectiveSender, isGroup, groupJid);
+        if (!handled) handled = await handleEconomy(sock, message, command, args, effectiveSender, isGroup, groupJid);
+        if (!handled) handled = await handleGambling(sock, message, command, args, effectiveSender, isGroup, groupJid);
+        if (!handled) handled = await handleFun(sock, message, command, args, effectiveSender, isGroup, groupJid);
+        if (!handled) handled = await handleInteractions(sock, message, command, args, effectiveSender, isGroup, groupJid);
+        if (!handled) handled = await handleGames(sock, message, command, args, effectiveSender, isGroup, groupJid);
+        if (!handled) handled = await handlePokemon(sock, message, command, args, effectiveSender, isGroup, groupJid);
+        if (!handled) handled = await handleDownloader(sock, message, command, args, effectiveSender, isGroup, groupJid);
+        if (!handled) handled = await handleRpg(sock, message, command, args, effectiveSender, isGroup, groupJid);
+        if (!handled) handled = await handleGuild(sock, message, command, args, effectiveSender, isGroup, groupJid);
 
       } catch (err) {
         console.error(`[${botCfg.name}] ⚠️ Error handling message:`, err.message);

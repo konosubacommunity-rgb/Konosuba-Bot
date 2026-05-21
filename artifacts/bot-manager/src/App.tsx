@@ -4,6 +4,8 @@ import Manager from "@/pages/Manager";
 
 const queryClient = new QueryClient();
 
+const BASE = import.meta.env.BASE_URL || "/manager/";
+
 function Router() {
   return (
     <Switch>
@@ -20,7 +22,7 @@ function Router() {
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <WouterRouter base="">
+      <WouterRouter base={BASE.replace(/\/$/, "")}>
         <Router />
       </WouterRouter>
     </QueryClientProvider>

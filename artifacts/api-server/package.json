@@ -1,5 +1,5 @@
 {
-  "name": "konosuba-api-server",
+  "name": "@workspace/api-server",
   "version": "0.0.0",
   "private": true,
   "scripts": {

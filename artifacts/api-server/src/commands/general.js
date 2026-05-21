@@ -6,7 +6,7 @@ const Group = require('../models/Group');
 const { formatMs, formatMoney, isOwner, getUserName } = require('../utils/helpers');
 const { generateProfileCard, generateBalanceCard } = require('../utils/imageGen');
 
-const WEBSITE_URL = process.env.WEBSITE_URL || 'https://konosubaweb.vercel.app';
+const WEBSITE_URL = process.env.WEBSITE_URL || 'https://konosuba-website.onrender.com';
 
 const MENU_TEXT = `Hᴇʏʏʏʏʏ {user}... ɪ'ᴍ Aǫᴜᴀ ꜰʀᴏᴍ ᴛʜᴇ  𝐊𝚯𝐍𝚯𝐒𝐔𝐁𝚫 ᴄᴏᴍᴜɴɪᴛʏ ɴɪᴄᴇ ᴛᴏ ᴍᴇᴇᴛ ʏᴏᴜ!
 
@@ -286,7 +286,7 @@ ${modList}
     if (quotedSender) targetJid = quotedSender;
     else if (mentions.length > 0) targetJid = mentions[0];
 
-    let user = await User.findOne({ jid: targetJid });
+    let user = await User.findByWhatsAppId(targetJid);
     if (!user || !user.registered) {
       await sock.sendMessage(dest, {
         text: `❌ @${targetJid.split('@')[0]} hasn't registered on the Konosuba website yet.\n\n🌐 They can sign up at:\n${WEBSITE_URL}`,
@@ -330,17 +330,18 @@ ${modList}
   }
 
   if (command === 'reg' || command === 'register') {
+    // sender is always phone JID at this point (server resolves LID before calling handlers)
     const phoneNumber = sender.split('@')[0];
-    const user = await User.findOne({ jid: sender });
+    const user = await User.findByWhatsAppId(sender);
 
     if (user && user.registered) {
       await sock.sendMessage(dest, {
         text: `✅ *Already Registered!*
 
-📱 Your WhatsApp number is linked to Konosuba.
+📱 Your WhatsApp number *+${phoneNumber}* is linked to Konosuba.
 
 🌐 *View your live dashboard:*
-${WEBSITE_URL}/dashboard
+${WEBSITE_URL}
 
 > Log in with your WhatsApp number and your password.`,
       }, { quoted: message });
@@ -348,18 +349,20 @@ ${WEBSITE_URL}/dashboard
     }
 
     await sock.sendMessage(dest, {
-      text: `🧿 *Join Konosuba!*
+      text: `🧿 *Register with Konosuba!*
 ━━━━━━━━━━━━━━━━━━━━━
 
-To create your account, visit the website *first*:
-🌐 *${WEBSITE_URL}*
+To create your account, visit the website and sign up using your *WhatsApp number*:
 
-📱 *Your WhatsApp number to use:*
-*${phoneNumber}*
+📱 *Your number:*
+*+${phoneNumber}*
+
+🌐 *Sign up at:*
+*${WEBSITE_URL}*
 
 ━━━━━━━━━━━━━━━━━━━━━
-> Sign up on the website using the exact number above.
-> Once registered, you can use all bot commands and your wallet 💰, bank 🏦, level ⭐ and XP ⚡ will sync live!
+> Use the exact number above when registering.
+> Once registered, all commands unlock and your wallet 💰, bank 🏦, level ⭐ and XP ⚡ sync live with the website!
 > You'll also receive a *$43,000 welcome bonus* 🎉`,
     }, { quoted: message });
     return true;
