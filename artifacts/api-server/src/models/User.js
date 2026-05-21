@@ -1,7 +1,7 @@
 const mongoose = require('mongoose');
 
 const userSchema = new mongoose.Schema({
-  jid:      { type: String, required: true, unique: true, sparse: true },
+  jid:      { type: String, unique: true, sparse: true },
   lid:      { type: String, unique: true, sparse: true },
   name:     { type: String, default: 'Unknown' },
   username: String,
@@ -89,8 +89,6 @@ const userSchema = new mongoose.Schema({
 
 }, { timestamps: true });
 
-userSchema.index({ jid: 1 }, { sparse: true });
-userSchema.index({ lid: 1 }, { sparse: true });
 userSchema.index({ registered: 1, createdAt: -1 });
 
 userSchema.virtual('netWorth').get(function () {
