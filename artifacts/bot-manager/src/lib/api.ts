@@ -1,4 +1,4 @@
-const API_ORIGIN = (import.meta as unknown as { env: Record<string, string> }).env?.VITE_API_URL ?? '';
+const API_ORIGIN: string = (import.meta.env.VITE_API_URL as string | undefined) || '';
 const BASE = `${API_ORIGIN}/api/website`;
 const ADMIN_KEY = (() => {
   try { return localStorage.getItem('adminKey') || ''; } catch { return ''; }
