@@ -37,6 +37,38 @@ function isOwnerJid(jid) {
   return isOwner(jid);
 }
 
+async function isBotMod(jid) {
+  if (!jid) return false;
+  if (isOwner(jid)) return true;
+  try {
+    const User = require('../models/User');
+    const user = await User.findOne({ jid });
+    return !!user?.isMod;
+  } catch { return false; }
+}
+
+async function isBotAdmin(jid) {
+  if (!jid) return false;
+  if (isOwner(jid)) return true;
+  try {
+    const User = require('../models/User');
+    const user = await User.findOne({ jid });
+    return !!user?.isAdmin;
+  } catch { return false; }
+}
+
+async function getBotRole(jid) {
+  if (!jid) return 'user';
+  if (isOwner(jid)) return 'owner';
+  try {
+    const User = require('../models/User');
+    const user = await User.findOne({ jid });
+    if (user?.isMod)   return 'mod';
+    if (user?.isAdmin) return 'admin';
+  } catch {}
+  return 'user';
+}
+
 function getMentions(message) {
   return message.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
 }
@@ -68,6 +100,7 @@ function randomTitle() {
 
 module.exports = {
   formatMs, formatMoney, getRandom, randomInt, getXpForLevel,
-  isOwner, isOwnerJid, getMentions, getQuotedSender, getUserName,
+  isOwner, isOwnerJid, isBotMod, isBotAdmin, getBotRole,
+  getMentions, getQuotedSender, getUserName,
   parseAmount, randomTitle,
 };
