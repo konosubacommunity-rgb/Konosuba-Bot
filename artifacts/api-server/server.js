@@ -477,12 +477,12 @@ app.post('/api/bots/:id/restart', async (req, res) => {
   app.listen(PORT, () => console.log(`\n🌊  Konosuba Bot Server → http://localhost:${PORT}\n`));
 
   const bots = await BotConfig.find().lean();
-  if (!bots.length) { co { state } = await useMongoDBAuthState(bot.botId);
-      if (!nsole.log('No bots configured yet. Add one via the Bot Manager.'); return; }
+  if (!bots.length) { console.log('No bots configured yet. Add one via the Bot Manager.'); return; }
   console.log(`Auto-starting registered bot(s)…`);
   for (const bot of bots) {
     try {
-      conststate.creds.registered) {
+      const { state } = await useMongoDBAuthState(bot.botId);
+      if (!state.creds.registered) {
         console.log(`  ⏭ ${bot.name} — not paired yet, skipping auto-start`);
         continue;
       }
