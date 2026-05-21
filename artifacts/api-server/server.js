@@ -352,12 +352,14 @@ app.get('/api/bots', async (_req, res) => {
       const inst    = botInstances.get(bot.botId);
       const pairing = pairingStore.get(bot.botId);
       return {
-        id:          bot.botId,
-        name:        bot.name,
-        phone:       bot.phone,
+        _id:         bot.botId,
+        botId:       bot.botId,
+        botName:     bot.name,
+        phoneNumber: bot.phone,
         avatarData:  bot.avatarData || null,
         createdAt:   bot.createdAt,
         status:      inst?.status || 'offline',
+        isConnected: inst?.status === 'connected',
         messages:    inst?.messages || 0,
         uptime:      inst?.startTime ? Date.now() - inst.startTime : 0,
         pairingCode: pairing && pairing.expiresAt > Date.now() ? pairing.code : null,
