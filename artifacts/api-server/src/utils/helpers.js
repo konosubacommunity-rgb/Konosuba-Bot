@@ -1,73 +1,60 @@
 const config = require('../config');
 
+function isOwner(jid) {
+  const num = jid.split('@')[0].replace(/\D/g, '');
+  const owners = (process.env.OWNER_NUMBERS || config.OWNER_NUMBERS || '')
+    .split(',').map(n => n.trim().replace(/\D/g, '')).filter(Boolean);
+  return owners.includes(num);
+}
+
 function formatMs(ms) {
+  if (ms <= 0) return '0s';
   const s = Math.floor(ms / 1000);
   const m = Math.floor(s / 60);
   const h = Math.floor(m / 60);
   const d = Math.floor(h / 24);
-  if (d > 0) return `${d}d ${h % 24}h ${m % 60}m`;
-  if (h > 0) return `${h}h ${m % 60}m ${s % 60}s`;
-  if (m > 0) return `${m}m ${s % 60}s`;
+  if (d > 0)  return `${d}d ${h % 24}h`;
+  if (h > 0)  return `${h}h ${m % 60}m`;
+  if (m > 0)  return `${m}m ${s % 60}s`;
   return `${s}s`;
 }
 
 function formatMoney(n) {
-  return '$' + Number(n).toLocaleString('en-US');
+  const num = Number(n) || 0;
+  if (num >= 1_000_000) return `$${(num / 1_000_000).toFixed(2)}M`;
+  if (num >= 1_000)     return `$${(num / 1_000).toFixed(2)}K`;
+  return `$${num.toFixed(2)}`;
 }
 
-function getRandom(arr) {
-  return arr[Math.floor(Math.random() * arr.length)];
+function parseAmount(str, wallet) {
+  if (!str) return null;
+  if (str === 'all' || str === 'max') return wallet || null;
+  if (str.endsWith('%') && wallet) return Math.floor(wallet * (parseFloat(str) / 100));
+  if (str.endsWith('k') || str.endsWith('K')) return Math.floor(parseFloat(str) * 1000);
+  if (str.endsWith('m') || str.endsWith('M')) return Math.floor(parseFloat(str) * 1_000_000);
+  const n = parseFloat(str.replace(/,/g, ''));
+  return isNaN(n) ? null : Math.floor(n);
 }
 
 function randomInt(min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
-function getXpForLevel(level) {
-  return level * 100;
+function getRandom(arr) {
+  return arr[Math.floor(Math.random() * arr.length)];
 }
 
-function isOwner(jid) {
-  if (!jid) return false;
-  const phoneFromJid = jid.split('@')[0];
-  return config.OWNER_NUMBERS.includes(phoneFromJid);
+function getMentions(msg) {
+  return msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
 }
 
-function isOwnerJid(jid) {
-  return isOwner(jid);
+function getQuotedSender(msg) {
+  return msg.message?.extendedTextMessage?.contextInfo?.participant || null;
 }
 
-function getMentions(message) {
-  return message.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
+function capitalize(str) {
+  if (!str) return '';
+  return str.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
 }
 
-function getQuotedSender(message) {
-  return message.message?.extendedTextMessage?.contextInfo?.participant || null;
-}
-
-function getUserName(message) {
-  return (
-    message.pushName ||
-    message.verifiedBizName ||
-    message.key.remoteJid.split('@')[0]
-  );
-}
-
-function parseAmount(str) {
-  const n = parseInt(str, 10);
-  if (isNaN(n) || n <= 0) return null;
-  return n;
-}
-
-const ADJECTIVES = ['adventurous', 'bold', 'crafty', 'daring', 'epic', 'fierce', 'glorious', 'heroic', 'infamous', 'legendary'];
-const NOUNS = ['dragon', 'phoenix', 'titan', 'warrior', 'knight', 'mage', 'rogue', 'hunter', 'paladin', 'wizard'];
-
-function randomTitle() {
-  return `${getRandom(ADJECTIVES)} ${getRandom(NOUNS)}`;
-}
-
-module.exports = {
-  formatMs, formatMoney, getRandom, randomInt, getXpForLevel,
-  isOwner, isOwnerJid, getMentions, getQuotedSender, getUserName,
-  parseAmount, randomTitle,
-};
+module.exports = { isOwner, formatMs, formatMoney, parseAmount, randomInt, getRandom, getMentions, getQuotedSender, capitalize };

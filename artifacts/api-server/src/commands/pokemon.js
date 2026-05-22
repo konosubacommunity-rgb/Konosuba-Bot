@@ -1,416 +1,354 @@
-const User = require('../models/User');
+const User  = require('../models/User');
 const { randomInt, getRandom, formatMoney } = require('../utils/helpers');
-const { syncUserToWebsite, logActivity } = require('../utils/website-sync');
+const { syncUserToWebsite, logActivity }    = require('../utils/websiteSync');
 
-const STARTERS = [
-  { name: 'Bulbasaur', type: 'Grass/Poison', hp: 45, moves: ['Vine Whip', 'Tackle', 'Growl', 'Leech Seed'] },
-  { name: 'Charmander', type: 'Fire', hp: 39, moves: ['Scratch', 'Ember', 'Growl', 'Smokescreen'] },
-  { name: 'Squirtle', type: 'Water', hp: 44, moves: ['Tackle', 'Water Gun', 'Tail Whip', 'Bubble'] },
-  { name: 'Pikachu', type: 'Electric', hp: 35, moves: ['Thundershock', 'Quick Attack', 'Growl', 'Thunder Wave'] },
+// ─── PokéAPI helpers ─────────────────────────────────────────────────────────
+
+const POKE_CACHE = new Map();   // cache { name/id -> pokeData } to avoid rate-limit
+
+async function fetchPoke(nameOrId) {
+  const key = String(nameOrId).toLowerCase();
+  if (POKE_CACHE.has(key)) return POKE_CACHE.get(key);
+  try {
+    const res  = await fetch(`https://pokeapi.co/api/v2/pokemon/${key}`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    const info = {
+      id:     data.id,
+      name:   data.name,
+      types:  data.types.map(t => capitalize(t.type.name)).join('/'),
+      hp:     data.stats.find(s => s.stat.name === 'hp')?.base_stat || 45,
+      attack: data.stats.find(s => s.stat.name === 'attack')?.base_stat || 50,
+      defense:data.stats.find(s => s.stat.name === 'defense')?.base_stat || 45,
+      speed:  data.stats.find(s => s.stat.name === 'speed')?.base_stat || 45,
+      weight: (data.weight / 10).toFixed(1),   // kg
+      height: (data.height / 10).toFixed(1),   // m
+      moves:  data.moves.slice(0, 4).map(m => capitalize(m.move.name.replace(/-/g, ' '))),
+      // Official artwork — high-res (up to 475×475 PNG, upscaled by WhatsApp on display)
+      imageUrl: `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${data.id}.png`,
+      // Animated sprite fallback (smaller)
+      spriteUrl: data.sprites.front_default,
+    };
+    POKE_CACHE.set(key, info);
+    return info;
+  } catch { return null; }
+}
+
+async function downloadPokeImage(url) {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const ab  = await res.arrayBuffer();
+    return Buffer.from(ab);
+  } catch { return null; }
+}
+
+function capitalize(str) {
+  return str.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+}
+
+// ─── Wild Pokémon pool (PokéAPI IDs 1-151 gen-1) ─────────────────────────────
+
+const WILD_IDS = [
+  16, 19, 23, 27, 29, 32, 35, 37, 39, 41, 43, 46, 48, 50, 52, 54,
+  56, 58, 60, 63, 66, 69, 72, 74, 77, 79, 81, 83, 84, 86, 88, 90,
+  92, 96, 98, 100, 102, 104, 107, 109, 111, 113, 114, 115, 116, 118,
+  120, 122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133,
+  137, 138, 140, 147, 150, 151,
 ];
 
-const WILD_POKEMON = [
-  { name: 'Rattata', type: 'Normal', hp: 30, moves: ['Tackle', 'Quick Attack'] },
-  { name: 'Pidgey', type: 'Normal/Flying', hp: 40, moves: ['Gust', 'Tackle'] },
-  { name: 'Caterpie', type: 'Bug', hp: 45, moves: ['Tackle', 'String Shot'] },
-  { name: 'Geodude', type: 'Rock', hp: 40, moves: ['Tackle', 'Rock Throw'] },
-  { name: 'Gastly', type: 'Ghost/Poison', hp: 30, moves: ['Lick', 'Night Shade'] },
-  { name: 'Eevee', type: 'Normal', hp: 55, moves: ['Tackle', 'Quick Attack', 'Sand Attack'] },
-  { name: 'Magikarp', type: 'Water', hp: 20, moves: ['Splash'] },
-  { name: 'Snorlax', type: 'Normal', hp: 160, moves: ['Body Slam', 'Tackle', 'Rest'] },
-  { name: 'Mewtwo', type: 'Psychic', hp: 106, moves: ['Psychic', 'Swift', 'Aura Sphere', 'Recover'] },
-  { name: 'Gengar', type: 'Ghost/Poison', hp: 60, moves: ['Shadow Ball', 'Lick', 'Hypnosis', 'Dream Eater'] },
-];
+const STARTER_IDS = [1, 4, 7, 25];   // Bulbasaur, Charmander, Squirtle, Pikachu
 
 const EVOLUTIONS = {
-  Caterpie: 'Metapod',
-  Metapod: 'Butterfree',
-  Bulbasaur: 'Ivysaur',
-  Ivysaur: 'Venusaur',
-  Charmander: 'Charmeleon',
-  Charmeleon: 'Charizard',
-  Squirtle: 'Wartortle',
-  Wartortle: 'Blastoise',
-  Eevee: 'Vaporeon',
-  Magikarp: 'Gyarados',
+  bulbasaur: 'ivysaur',   ivysaur: 'venusaur',
+  charmander:'charmeleon',charmeleon:'charizard',
+  squirtle:  'wartortle', wartortle:'blastoise',
+  caterpie:  'metapod',   metapod:'butterfree',
+  eevee:     'vaporeon',  magikarp:'gyarados',
+  pikachu:   'raichu',
 };
 
 async function handlePokemon(sock, message, command, args, sender, isGroup, groupJid) {
   const dest = isGroup ? groupJid : sender;
-  const user = await User.findOne({ jid: sender }) || new User({ jid: sender, name: message.pushName });
-  if (user.banned) { await sock.sendMessage(dest, { text: '*🚫 Access Denied*' }, { quoted: message }); return true; }
 
-  const pokemonCmds = ['pokemon', 'party', 'pc', 'starter', 'catch', 'hunt', 'battle', 'gymbattle', 'heal', 'revive', 'evolve', 'transfer', 'release', 'rename', 'buddy', 'feed', 'train', 'moves', 'team', 'pokeshop'];
+  const pokemonCmds = [
+    'pokemon', 'party', 'pc', 'starter', 'catch', 'hunt',
+    'battle', 'gymbattle', 'heal', 'revive', 'evolve',
+    'transfer', 'release', 'rename', 'buddy', 'feed', 'train',
+    'moves', 'team', 'pokeshop', 'pokedex',
+  ];
   if (!pokemonCmds.includes(command)) return false;
 
+  // FIX: use findOrCreateByJid instead of findOne({jid}) + new User
+  const user = await User.findOrCreateByJid(sender, message.pushName);
+  if (user.banned) {
+    await sock.sendMessage(dest, { text: '*🚫 Access Denied*' }, { quoted: message });
+    return true;
+  }
+
+  // ── .starter ───────────────────────────────────────────────────────────────
   if (command === 'starter') {
     if (user.starter) {
       await sock.sendMessage(dest, { text: '❌ You already have a starter! Use `.party` to see your Pokémon.' }, { quoted: message });
       return true;
     }
-    const list = STARTERS.map((p, i) => `*${i + 1}.* ${p.name} (${p.type})`).join('\n');
+
     const idx = args[0] ? parseInt(args[0]) - 1 : -1;
-    if (idx >= 0 && idx < STARTERS.length) {
-      const starter = STARTERS[idx];
+
+    if (idx >= 0 && idx < STARTER_IDS.length) {
+      const pokeId   = STARTER_IDS[idx];
+      const poke     = await fetchPoke(pokeId);
+      if (!poke) { await sock.sendMessage(dest, { text: '❌ PokéAPI unavailable. Try again.' }, { quoted: message }); return true; }
+
+      const shiny = Math.random() < 0.01;
       user.starter = true;
-      user.pokemon.push({ name: starter.name, level: 5, hp: starter.hp, maxHp: starter.hp, moves: starter.moves, shiny: Math.random() < 0.01 });
+      user.pokemon.push({
+        name:   capitalize(poke.name),
+        level:  5,
+        hp:     poke.hp,
+        maxHp:  poke.hp,
+        moves:  poke.moves,
+        shiny,
+        pokeId: poke.id,
+      });
       await user.save();
-      
-      // ✨ SYNC TO WEBSITE
-      await syncUserToWebsite(sender, { starter: user.starter, pokemon: user.pokemon });
-      await logActivity(sender, '🐾', 'Got Starter', `Got ${starter.name}!`, 'pokemon');
-      
-      await sock.sendMessage(dest, { text: `✅ You chose *${starter.name}* as your starter! ${Math.random() < 0.01 ? '✨ It\'s SHINY!' : ''}\n\nUse \`.party\` to see your team!` }, { quoted: message });
+      await syncUserToWebsite(sender, { starter: true, pokemon: user.pokemon });
+      await logActivity(sender, '🌟', 'Starter Pokémon', `Chose ${capitalize(poke.name)}!`, 'pokemon');
+
+      const img = await downloadPokeImage(poke.imageUrl);
+      const caption = `🌟 *You chose ${shiny ? '✨ Shiny ' : ''}${capitalize(poke.name)}!*\n\n🏷️ Type: ${poke.types}\n❤️ HP: ${poke.hp}\n⚔️ Atk: ${poke.attack} | 🛡️ Def: ${poke.defense}\n⚡ Speed: ${poke.speed}\n📐 ${poke.height}m / ${poke.weight}kg\n\n🎯 Moves: ${poke.moves.join(', ')}\n\nUse \`.party\` to see your team!`;
+      if (img) {
+        await sock.sendMessage(dest, { image: img, caption }, { quoted: message });
+      } else {
+        await sock.sendMessage(dest, { text: caption }, { quoted: message });
+      }
     } else {
-      await sock.sendMessage(dest, { text: `🐾 *Choose your Starter Pokémon!*\n\n${list}\n\nUse: \`.starter <number>\`` }, { quoted: message });
+      // Show starter list with images
+      const starters = await Promise.all(STARTER_IDS.map(id => fetchPoke(id)));
+      const list = starters.map((p, i) => `*${i + 1}.* ${p ? capitalize(p.name) + ` (${p.types})` : '?'}`).join('\n');
+      await sock.sendMessage(dest, {
+        text: `🌟 *Choose your starter Pokémon:*\n\n${list}\n\nUse: \`.starter <number>\``,
+      }, { quoted: message });
     }
     return true;
   }
 
-  if (command === 'party' || command === 'pokemon' || command === 'team') {
-    if (!user.starter || user.pokemon.length === 0) {
-      await sock.sendMessage(dest, { text: '❌ You don\'t have any Pokémon! Use `.starter` to get one.' }, { quoted: message });
+  // ── .party / .team ─────────────────────────────────────────────────────────
+  if (command === 'party' || command === 'team') {
+    if (!user.pokemon.length) {
+      await sock.sendMessage(dest, { text: '❌ No Pokémon! Use `.starter` to choose one.' }, { quoted: message });
       return true;
     }
     const list = user.pokemon.slice(0, 6).map((p, i) =>
-      `*${i + 1}.* ${p.shiny ? '✨' : ''}${p.name} Lv.${p.level} — HP: ${p.hp}/${p.maxHp}`
+      `${i + 1}. ${p.shiny ? '✨ ' : ''}*${p.nickname || p.name}* Lv.${p.level} — HP: ${p.hp}/${p.maxHp}`
     ).join('\n');
-    await sock.sendMessage(dest, { text: `🐾 *Your Party*\n\n${list}` }, { quoted: message });
+    await sock.sendMessage(dest, { text: `🐾 *${user.name}'s Party*\n\n${list}` }, { quoted: message });
     return true;
   }
 
-  if (command === 'pc') {
-    if (user.pokemon.length === 0) {
-      await sock.sendMessage(dest, { text: '❌ Your PC is empty!' }, { quoted: message });
+  // ── .pokedex / .pc ─────────────────────────────────────────────────────────
+  if (command === 'pokedex' || command === 'pc') {
+    const query = args.join(' ');
+    if (!query) {
+      const count = user.pokemon.length;
+      await sock.sendMessage(dest, { text: `📖 *Pokédex*\n\nYou've caught *${count}* Pokémon.\n\nUse \`.pokedex <name>\` to look up any Pokémon.` }, { quoted: message });
       return true;
     }
-    const list = user.pokemon.map((p, i) =>
-      `*${i + 1}.* ${p.shiny ? '✨' : ''}${p.nickname || p.name} Lv.${p.level}`
-    ).join('\n');
-    await sock.sendMessage(dest, { text: `💻 *PC Storage (${user.pokemon.length} Pokémon)*\n\n${list}` }, { quoted: message });
+    const poke = await fetchPoke(query.toLowerCase().replace(/\s+/g, '-'));
+    if (!poke) { await sock.sendMessage(dest, { text: `❌ Pokémon "*${query}*" not found.` }, { quoted: message }); return true; }
+    const img = await downloadPokeImage(poke.imageUrl);
+    const text = `📖 *#${poke.id} ${capitalize(poke.name)}*\n\n🏷️ Type: ${poke.types}\n❤️ HP: ${poke.hp}\n⚔️ Atk: ${poke.attack}\n🛡️ Def: ${poke.defense}\n⚡ Speed: ${poke.speed}\n📐 Height: ${poke.height}m | Weight: ${poke.weight}kg\n\n🎯 Moves: ${poke.moves.join(', ')}`;
+    if (img) {
+      await sock.sendMessage(dest, { image: img, caption: text }, { quoted: message });
+    } else {
+      await sock.sendMessage(dest, { text }, { quoted: message });
+    }
     return true;
   }
 
-  if (command === 'hunt' || command === 'catch') {
+  // ── .catch / .hunt ─────────────────────────────────────────────────────────
+  if (command === 'catch' || command === 'hunt') {
     if (!user.starter) {
-      await sock.sendMessage(dest, { text: '❌ Get a starter first! Use `.starter`' }, { quoted: message });
+      await sock.sendMessage(dest, { text: '❌ Choose a starter first with `.starter`!' }, { quoted: message });
       return true;
     }
-    if (user.isOnCooldown('hunt')) {
-      const { formatMs } = require('../utils/helpers');
-      const left = user.getCooldownLeft('hunt');
-      await sock.sendMessage(dest, { text: `⏳ You're still searching! Try again in *${formatMs(left)}*` }, { quoted: message });
+    if (!user.pokeBalls) {
+      await sock.sendMessage(dest, { text: '❌ No Poké Balls! Buy more with `.pokeshop`.' }, { quoted: message });
       return true;
     }
-    const wild = getRandom(WILD_POKEMON);
-    const isShiny = Math.random() < 0.01;
-    user.setCooldown('hunt');
-    if (command === 'hunt') {
+
+    const wildId  = getRandom(WILD_IDS);
+    const poke    = await fetchPoke(wildId);
+    if (!poke) { await sock.sendMessage(dest, { text: '❌ PokéAPI unavailable. Try again.' }, { quoted: message }); return true; }
+
+    user.pokeBalls--;
+    const caught = Math.random() < 0.35;
+    const shiny  = Math.random() < 0.005;
+
+    const img = await downloadPokeImage(poke.imageUrl);
+
+    if (caught) {
+      user.pokemon.push({
+        name:   capitalize(poke.name),
+        level:  randomInt(2, 20),
+        hp:     poke.hp,
+        maxHp:  poke.hp,
+        moves:  poke.moves,
+        shiny,
+        pokeId: poke.id,
+      });
       await user.save();
-      await sock.sendMessage(dest, {
-        text: `🌿 *A wild ${isShiny ? '✨' : ''}${wild.name} appeared!*\n\nType: ${wild.type}\nHP: ${wild.hp}\nMoves: ${wild.moves.join(', ')}\n\nUse \`.catch\` to catch it or \`.battle\` to fight!`,
-      }, { quoted: message });
-      return true;
-    }
-    if (command === 'catch') {
-      const balls = user.pokeBalls || 0;
-      if (balls <= 0) {
-        await sock.sendMessage(dest, { text: '❌ No Poké Balls! Buy some at `.pokeshop`' }, { quoted: message });
-        return true;
-      }
-      user.pokeBalls--;
-      const catchRate = Math.random() < 0.4;
-      if (catchRate) {
-        user.pokemon.push({ name: wild.name, level: randomInt(1, 10), hp: wild.hp, maxHp: wild.hp, moves: wild.moves, shiny: isShiny });
-        await user.save();
-        
-        // ✨ SYNC TO WEBSITE
-        await syncUserToWebsite(sender, { pokemon: user.pokemon, pokeBalls: user.pokeBalls });
-        await logActivity(sender, '🐾', 'Caught Pokémon', `Caught ${isShiny ? '✨ ' : ''}${wild.name}!`, 'pokemon');
-        
-        await sock.sendMessage(dest, {
-          text: `✅ Gotcha! ${isShiny ? '✨ *SHINY* ' : ''}*${wild.name}* was caught!\n🎾 Poké Balls left: ${user.pokeBalls}`,
-        }, { quoted: message });
+      await syncUserToWebsite(sender, { pokemon: user.pokemon, pokeBalls: user.pokeBalls });
+      await logActivity(sender, '🎉', 'Caught Pokémon', `Caught ${shiny ? '✨ Shiny ' : ''}${capitalize(poke.name)}!`, 'pokemon');
+
+      const caption = `🎉 *Caught ${shiny ? '✨ Shiny ' : ''}${capitalize(poke.name)}!*\n\n🏷️ Type: ${poke.types}\n❤️ HP: ${poke.hp}\n⚔️ Atk: ${poke.attack} | ⚡ Spd: ${poke.speed}\n\n🎯 Moves: ${poke.moves.join(', ')}\n🎒 Poké Balls left: ${user.pokeBalls}`;
+      if (img) {
+        await sock.sendMessage(dest, { image: img, caption }, { quoted: message });
       } else {
-        await user.save();
-        
-        // ✨ SYNC TO WEBSITE
-        await syncUserToWebsite(sender, { pokeBalls: user.pokeBalls });
-        await logActivity(sender, '🐾', 'Catch Failed', `Failed to catch ${wild.name}!`, 'pokemon');
-        
-        await sock.sendMessage(dest, { text: `💨 *${wild.name}* broke free! Better luck next time!\n🎾 Poké Balls left: ${user.pokeBalls}` }, { quoted: message });
+        await sock.sendMessage(dest, { text: caption }, { quoted: message });
       }
-      return true;
+    } else {
+      await user.save();
+      const caption = `💨 *A wild ${capitalize(poke.name)} appeared but escaped!*\n\n🏷️ Type: ${poke.types}\n🎒 Poké Balls left: ${user.pokeBalls}`;
+      if (img) {
+        await sock.sendMessage(dest, { image: img, caption }, { quoted: message });
+      } else {
+        await sock.sendMessage(dest, { text: caption }, { quoted: message });
+      }
     }
+    return true;
   }
 
-  if (command === 'heal') {
+  // ── .heal / .revive ────────────────────────────────────────────────────────
+  if (command === 'heal' || command === 'revive') {
     user.pokemon.forEach(p => { p.hp = p.maxHp; });
     await user.save();
-    
-    // ✨ SYNC TO WEBSITE
-    await syncUserToWebsite(sender, { pokemon: user.pokemon });
-    await logActivity(sender, '❤️', 'Healed Pokémon', 'Healed all Pokémon!', 'pokemon');
-    
-    await sock.sendMessage(dest, { text: '❤️ All your Pokémon have been fully healed!' }, { quoted: message });
+    await sock.sendMessage(dest, { text: '💊 *All Pokémon healed to full HP!*' }, { quoted: message });
     return true;
   }
 
+  // ── .evolve ────────────────────────────────────────────────────────────────
   if (command === 'evolve') {
-    const name = args.join(' ');
-    const pokemonIdx = user.pokemon.findIndex(p => p.name.toLowerCase() === name.toLowerCase() || (p.nickname && p.nickname.toLowerCase() === name.toLowerCase()));
-    if (pokemonIdx === -1) {
-      await sock.sendMessage(dest, { text: '❌ Pokémon not found in your party!' }, { quoted: message });
-      return true;
-    }
-    const pokemon = user.pokemon[pokemonIdx];
-    const evolution = EVOLUTIONS[pokemon.name];
-    if (!evolution) {
-      await sock.sendMessage(dest, { text: `❌ *${pokemon.name}* cannot evolve!` }, { quoted: message });
-      return true;
-    }
-    if (pokemon.level < 16) {
-      await sock.sendMessage(dest, { text: `❌ *${pokemon.name}* needs to be at least level 16 to evolve! (Currently Lv.${pokemon.level})` }, { quoted: message });
-      return true;
-    }
-    const prevName = pokemon.name;
-    pokemon.name = evolution;
-    pokemon.maxHp = Math.floor(pokemon.maxHp * 1.2);
-    pokemon.hp = pokemon.maxHp;
+    const name    = args.join(' ');
+    if (!name) { await sock.sendMessage(dest, { text: '❌ Usage: `.evolve <pokemon name>`' }, { quoted: message }); return true; }
+    const pokemon = user.pokemon.find(p => (p.nickname || p.name).toLowerCase() === name.toLowerCase());
+    if (!pokemon) { await sock.sendMessage(dest, { text: `❌ You don't have a ${name}!` }, { quoted: message }); return true; }
+    if (pokemon.level < 16) { await sock.sendMessage(dest, { text: `❌ ${pokemon.name} needs to be Level 16+ to evolve!` }, { quoted: message }); return true; }
+
+    const evoName = EVOLUTIONS[pokemon.name.toLowerCase()];
+    if (!evoName) { await sock.sendMessage(dest, { text: `❌ ${pokemon.name} can't evolve!` }, { quoted: message }); return true; }
+
+    const evoPoke  = await fetchPoke(evoName);
+    const oldName  = pokemon.name;
+
+    pokemon.name   = evoPoke ? capitalize(evoPoke.name) : capitalize(evoName);
+    pokemon.maxHp  = evoPoke ? evoPoke.hp : Math.floor(pokemon.maxHp * 1.2);
+    pokemon.hp     = pokemon.maxHp;
+    if (evoPoke) { pokemon.moves = evoPoke.moves; pokemon.pokeId = evoPoke.id; }
+
     await user.save();
-    
-    // ✨ SYNC TO WEBSITE
     await syncUserToWebsite(sender, { pokemon: user.pokemon });
-    await logActivity(sender, '🌟', 'Evolved Pokémon', `${prevName} evolved to ${evolution}!`, 'pokemon');
-    
-    await sock.sendMessage(dest, { text: `🌟 *${prevName}* evolved into *${evolution}*! HP increased to ${pokemon.maxHp}!` }, { quoted: message });
+
+    const img     = evoPoke ? await downloadPokeImage(evoPoke.imageUrl) : null;
+    const caption = `🌟 *${oldName} evolved into ${pokemon.name}!*\n\n${evoPoke ? `🏷️ Type: ${evoPoke.types}\n❤️ HP: ${evoPoke.hp}\n⚔️ Atk: ${evoPoke.attack} | 🛡️ Def: ${evoPoke.defense}` : `💪 HP increased to ${pokemon.maxHp}!`}`;
+    if (img) {
+      await sock.sendMessage(dest, { image: img, caption }, { quoted: message });
+    } else {
+      await sock.sendMessage(dest, { text: caption }, { quoted: message });
+    }
     return true;
   }
 
-  if (command === 'release') {
-    const name = args.join(' ');
-    const idx = user.pokemon.findIndex(p => p.name.toLowerCase() === name.toLowerCase());
-    if (idx === -1) {
-      await sock.sendMessage(dest, { text: '❌ Pokémon not found!' }, { quoted: message });
-      return true;
-    }
-    const released = user.pokemon[idx];
-    user.pokemon.splice(idx, 1);
-    await user.save();
-    
-    // ✨ SYNC TO WEBSITE
-    await syncUserToWebsite(sender, { pokemon: user.pokemon });
-    await logActivity(sender, '👋', 'Released Pokémon', `Released ${released.name}!`, 'pokemon');
-    
-    await sock.sendMessage(dest, { text: `👋 You released *${released.name}*. Goodbye!` }, { quoted: message });
-    return true;
-  }
-
-  if (command === 'rename') {
-    const pokeName = args[0];
-    const nickname = args.slice(1).join(' ');
-    if (!pokeName || !nickname) {
-      await sock.sendMessage(dest, { text: '❌ Usage: `.rename <pokemon> <nickname>`' }, { quoted: message });
-      return true;
-    }
-    const pokemon = user.pokemon.find(p => p.name.toLowerCase() === pokeName.toLowerCase());
-    if (!pokemon) {
-      await sock.sendMessage(dest, { text: '❌ Pokémon not found!' }, { quoted: message });
-      return true;
-    }
-    pokemon.nickname = nickname;
-    await user.save();
-    
-    // ✨ SYNC TO WEBSITE
-    await syncUserToWebsite(sender, { pokemon: user.pokemon });
-    await logActivity(sender, '🏷️', 'Renamed Pokémon', `Nicknamed ${pokemon.name} as ${nickname}!`, 'pokemon');
-    
-    await sock.sendMessage(dest, { text: `✅ *${pokemon.name}* has been nicknamed *${nickname}*!` }, { quoted: message });
-    return true;
-  }
-
-  if (command === 'buddy') {
-    const name = args.join(' ');
-    if (!name) {
-      await sock.sendMessage(dest, { text: `🐾 Your buddy: ${user.buddy || 'None set. Use \`.buddy <pokemon name>\`'}` }, { quoted: message });
-      return true;
-    }
-    const pokemon = user.pokemon.find(p => p.name.toLowerCase() === name.toLowerCase());
-    if (!pokemon) {
-      await sock.sendMessage(dest, { text: '❌ Pokémon not found!' }, { quoted: message });
-      return true;
-    }
-    user.buddy = pokemon.name;
-    await user.save();
-    
-    // ✨ SYNC TO WEBSITE
-    await syncUserToWebsite(sender, { buddy: user.buddy });
-    await logActivity(sender, '🐾', 'Buddy Set', `Set ${pokemon.name} as buddy!`, 'pokemon');
-    
-    await sock.sendMessage(dest, { text: `🐾 *${pokemon.name}* is now your buddy!` }, { quoted: message });
-    return true;
-  }
-
-  if (command === 'train') {
-    const name = args.join(' ');
-    const pokemon = user.pokemon.find(p => p.name.toLowerCase() === name.toLowerCase());
-    if (!pokemon) {
-      await sock.sendMessage(dest, { text: '❌ Pokémon not found!' }, { quoted: message });
-      return true;
-    }
-    pokemon.level += 1;
-    if (pokemon.level % 5 === 0) {
-      pokemon.maxHp = Math.floor(pokemon.maxHp * 1.1);
-      pokemon.hp = pokemon.maxHp;
-    }
-    await user.save();
-    
-    // ✨ SYNC TO WEBSITE
-    await syncUserToWebsite(sender, { pokemon: user.pokemon });
-    await logActivity(sender, '💪', 'Trained Pokémon', `${pokemon.name} reached Lv.${pokemon.level}!`, 'pokemon');
-    
-    const canEvolve = EVOLUTIONS[pokemon.name] && pokemon.level >= 16;
-    await sock.sendMessage(dest, {
-      text: `💪 *${pokemon.name}* trained hard and reached Lv.${pokemon.level}!${canEvolve ? '\n✨ *It can evolve!* Use `.evolve ' + pokemon.name + '`' : ''}`,
-    }, { quoted: message });
-    return true;
-  }
-
-  if (command === 'feed') {
-    const name = args.join(' ');
-    const pokemon = user.pokemon.find(p => p.name.toLowerCase() === name.toLowerCase());
-    if (!pokemon) {
-      await sock.sendMessage(dest, { text: '❌ Pokémon not found!' }, { quoted: message });
-      return true;
-    }
-    pokemon.hp = Math.min(pokemon.maxHp, (pokemon.hp || 0) + 20);
-    await user.save();
-    
-    // ✨ SYNC TO WEBSITE
-    await syncUserToWebsite(sender, { pokemon: user.pokemon });
-    await logActivity(sender, '🍎', 'Fed Pokémon', `Fed ${pokemon.name}!`, 'pokemon');
-    
-    await sock.sendMessage(dest, { text: `🍎 You fed *${pokemon.name}*! HP: ${pokemon.hp}/${pokemon.maxHp}` }, { quoted: message });
-    return true;
-  }
-
-  if (command === 'moves') {
-    const name = args.join(' ');
-    const pokemon = user.pokemon.find(p => p.name.toLowerCase() === name.toLowerCase());
-    if (!pokemon) {
-      await sock.sendMessage(dest, { text: '❌ Pokémon not found!' }, { quoted: message });
-      return true;
-    }
-    await sock.sendMessage(dest, {
-      text: `⚡ *${pokemon.name}'s Moves*\n\n${pokemon.moves.map((m, i) => `${i + 1}. ${m}`).join('\n')}`,
-    }, { quoted: message });
-    return true;
-  }
-
+  // ── .battle ────────────────────────────────────────────────────────────────
   if (command === 'battle') {
-    const mentions = message.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
-    const target = mentions[0];
-    if (!target) {
-      await sock.sendMessage(dest, { text: '❌ Mention a user to battle!' }, { quoted: message });
-      return true;
+    if (!user.pokemon.length) { await sock.sendMessage(dest, { text: '❌ You have no Pokémon to battle with!' }, { quoted: message }); return true; }
+    const quotedSender = message.message?.extendedTextMessage?.contextInfo?.participant;
+    const mentions     = message.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
+    const targetJid    = quotedSender || mentions[0];
+
+    // Wild battle if no target
+    const wildId  = getRandom(WILD_IDS);
+    const wild    = await fetchPoke(wildId);
+    if (!wild) { await sock.sendMessage(dest, { text: '❌ PokéAPI unavailable.' }, { quoted: message }); return true; }
+
+    const myPoke  = user.pokemon[0];
+    const myAtk   = 10 + myPoke.level * 2 + randomInt(1, 10);
+    const wildAtk = wild.attack + randomInt(1, 15);
+    const win     = myAtk > wildAtk;
+
+    if (win) {
+      const xpGain = Math.floor(wild.hp / 2);
+      myPoke.level += Math.random() < 0.3 ? 1 : 0;
+      user.addXp(xpGain);
+      await user.save();
+      await syncUserToWebsite(sender, { pokemon: user.pokemon, xp: user.xp, level: user.level });
+      await sock.sendMessage(dest, {
+        text: `⚔️ *${myPoke.name} vs ${capitalize(wild.name)}!*\n\n🗡️ Your attack: ${myAtk}\n👾 Wild attack: ${wildAtk}\n\n🏆 *${myPoke.name} wins!*\n+${xpGain} XP`,
+      }, { quoted: message });
+    } else {
+      myPoke.hp = Math.max(0, myPoke.hp - Math.floor(wild.attack / 2));
+      await user.save();
+      await sock.sendMessage(dest, {
+        text: `⚔️ *${myPoke.name} vs ${capitalize(wild.name)}!*\n\n🗡️ Your attack: ${myAtk}\n👾 Wild attack: ${wildAtk}\n\n💀 *${myPoke.name} lost!*\nHP: ${myPoke.hp}/${myPoke.maxHp}\nUse \`.heal\` to recover!`,
+      }, { quoted: message });
     }
-    const myPoke = user.pokemon.find(p => p.hp > 0);
-    if (!myPoke) {
-      await sock.sendMessage(dest, { text: '❌ All your Pokémon fainted! Use `.heal` to restore them.' }, { quoted: message });
-      return true;
-    }
-    const targetUser = await User.findOne({ jid: target });
-    const enemyPoke = targetUser?.pokemon?.find(p => p.hp > 0);
-    if (!enemyPoke) {
-      const wildPoke = getRandom(WILD_POKEMON);
-      const myAttack = randomInt(10, 30);
-      const enemyAttack = randomInt(8, 25);
-      const myWin = myAttack > enemyAttack || Math.random() < 0.5;
-      if (myWin) {
-        myPoke.level += 1;
-        user.addXp(20);
-        await user.save();
-        
-        // ✨ SYNC TO WEBSITE
-        await syncUserToWebsite(sender, { pokemon: user.pokemon, level: user.level, xp: user.xp });
-        await logActivity(sender, '⚔️', 'Won Battle', `Defeated wild ${wildPoke.name}!`, 'pokemon');
-        
-        await sock.sendMessage(dest, {
-          text: `⚔️ *Battle!*\n\n${myPoke.name} (Lv.${myPoke.level}) vs Wild ${wildPoke.name}\n\n🎉 *${myPoke.name} wins!* +20 XP, Level up!`,
-          mentions: [target],
-        }, { quoted: message });
-      } else {
-        myPoke.hp = Math.max(0, myPoke.hp - enemyAttack);
-        await user.save();
-        
-        // ✨ SYNC TO WEBSITE
-        await syncUserToWebsite(sender, { pokemon: user.pokemon });
-        await logActivity(sender, '⚔️', 'Lost Battle', `Defeated by wild ${wildPoke.name}!`, 'pokemon');
-        
-        await sock.sendMessage(dest, {
-          text: `⚔️ *Battle!*\n\n${myPoke.name} vs Wild ${wildPoke.name}\n\n💔 *${myPoke.name} lost!* HP: ${myPoke.hp}/${myPoke.maxHp}`,
-          mentions: [target],
-        }, { quoted: message });
-      }
-      return true;
-    }
-    const myWin = randomInt(1, 100) > 45;
-    
-    // ✨ SYNC TO WEBSITE
-    await syncUserToWebsite(sender, { pokemon: user.pokemon });
-    await logActivity(sender, '⚔️', 'Pvp Battle', myWin ? `Defeated ${enemyPoke.name}!` : `Lost to ${enemyPoke.name}!`, 'pokemon');
-    
+    return true;
+  }
+
+  // ── .moves ─────────────────────────────────────────────────────────────────
+  if (command === 'moves') {
+    const name    = args.join(' ');
+    const pokemon = name ? user.pokemon.find(p => (p.nickname || p.name).toLowerCase() === name.toLowerCase()) : user.pokemon[0];
+    if (!pokemon) { await sock.sendMessage(dest, { text: '❌ Pokémon not found in your party.' }, { quoted: message }); return true; }
     await sock.sendMessage(dest, {
-      text: `⚔️ *Pokémon Battle!*\n\n${myPoke.name} (Lv.${myPoke.level}) vs ${enemyPoke.name} (Lv.${enemyPoke.level})\n\n${myWin ? `🎉 *${myPoke.name}* wins!` : `😔 *${enemyPoke.name}* wins!`}`,
-      mentions: [target],
+      text: `🎯 *${pokemon.nickname || pokemon.name}'s Moves*\n\n${pokemon.moves.join('\n• ')}`,
     }, { quoted: message });
     return true;
   }
 
+  // ── .rename ────────────────────────────────────────────────────────────────
+  if (command === 'rename') {
+    const [pokeName, ...nickParts] = args;
+    const nick    = nickParts.join(' ');
+    if (!pokeName || !nick) { await sock.sendMessage(dest, { text: '❌ Usage: `.rename <pokemon> <nickname>`' }, { quoted: message }); return true; }
+    const pokemon = user.pokemon.find(p => (p.nickname || p.name).toLowerCase() === pokeName.toLowerCase());
+    if (!pokemon) { await sock.sendMessage(dest, { text: `❌ You don't have "${pokeName}".` }, { quoted: message }); return true; }
+    const old = pokemon.nickname || pokemon.name;
+    pokemon.nickname = nick;
+    await user.save();
+    await sock.sendMessage(dest, { text: `✅ Renamed *${old}* to *${nick}*!` }, { quoted: message });
+    return true;
+  }
+
+  // ── .release ───────────────────────────────────────────────────────────────
+  if (command === 'release') {
+    const name    = args.join(' ');
+    if (!name) { await sock.sendMessage(dest, { text: '❌ Usage: `.release <pokemon name>`' }, { quoted: message }); return true; }
+    const idx     = user.pokemon.findIndex(p => (p.nickname || p.name).toLowerCase() === name.toLowerCase());
+    if (idx === -1) { await sock.sendMessage(dest, { text: `❌ You don't have "${name}".` }, { quoted: message }); return true; }
+    const [released] = user.pokemon.splice(idx, 1);
+    await user.save();
+    await sock.sendMessage(dest, { text: `👋 *${released.nickname || released.name} was released!* Goodbye, friend!` }, { quoted: message });
+    return true;
+  }
+
+  // ── .pokeshop ──────────────────────────────────────────────────────────────
   if (command === 'pokeshop') {
     await sock.sendMessage(dest, {
-      text: `🏪 *Poké Shop*\n\n🎾 Poké Ball — $200\n🎾 Great Ball — $500\n🎾 Ultra Ball — $1,200\n\nUse \`.buy Poké Ball\` etc. to purchase!\n\nYour Poké Balls: ${user.pokeBalls || 0}`,
+      text: `🏪 *Pokéshop*\n\n🎒 Poké Ball ×10 — $500\n🔵 Great Ball ×10 — $1,000\n💊 Health Pack — $300 (full heal)\n\nTo buy, use:\n\`.buy pokeball\` / \`.buy greatball\` / \`.buy healthpack\`\n\n🎒 Poké Balls you have: *${user.pokeBalls || 0}*`,
     }, { quoted: message });
     return true;
   }
 
-  if (command === 'gymbattle') {
-    const gyms = ['Brock (Rock)', 'Misty (Water)', 'Lt. Surge (Electric)', 'Erika (Grass)', 'Koga (Poison)'];
-    const gym = getRandom(gyms);
-    const win = Math.random() < 0.5;
-    const reward = win ? randomInt(200, 800) : 0;
-    if (win && user) { 
-      user.wallet = (user.wallet || 0) + reward; 
-      await user.save();
-      
-      // ✨ SYNC TO WEBSITE
-      await syncUserToWebsite(sender, { wallet: user.wallet });
-      await logActivity(sender, '🏅', 'Won Gym Battle', `Defeated ${gym} and got ${formatMoney(reward)}!`, 'pokemon');
-    }
+  // ── .pokemon (help) ────────────────────────────────────────────────────────
+  if (command === 'pokemon') {
     await sock.sendMessage(dest, {
-      text: `🏅 *Gym Battle vs ${gym}!*\n\n${win ? `🎉 *You won!* Earned ${formatMoney(reward)} prize money!` : '😔 *You lost!* Train harder and try again!'}`,
+      text: `🐾 *Pokémon Commands*\n\n• \`.starter\` — Choose your starter\n• \`.party\` — See your team\n• \`.catch\` — Catch a wild Pokémon\n• \`.heal\` — Heal all Pokémon\n• \`.evolve <name>\` — Evolve a Pokémon\n• \`.battle\` — Battle a wild Pokémon\n• \`.pokedex <name>\` — Look up any Pokémon\n• \`.moves <name>\` — See a Pokémon's moves\n• \`.rename <pokemon> <nick>\` — Rename a Pokémon\n• \`.release <name>\` — Release a Pokémon\n• \`.pokeshop\` — Buy items`,
     }, { quoted: message });
     return true;
   }
 
-  if (command === 'revive') {
-    user.pokemon.forEach(p => { if (p.hp <= 0) p.hp = Math.floor(p.maxHp / 2); });
-    await user.save();
-    
-    // ✨ SYNC TO WEBSITE
-    await syncUserToWebsite(sender, { pokemon: user.pokemon });
-    await logActivity(sender, '💊', 'Revived Pokémon', 'Revived fainted Pokémon!', 'pokemon');
-    
-    await sock.sendMessage(dest, { text: '💊 Fainted Pokémon have been revived to half HP!' }, { quoted: message });
-    return true;
-  }
-
-  if (command === 'transfer') {
-    await sock.sendMessage(dest, { text: '🔄 Pokémon transfer feature coming soon!' }, { quoted: message });
-    return true;
-  }
-
-  return false;
+  return true;
 }
 
 module.exports = { handlePokemon };

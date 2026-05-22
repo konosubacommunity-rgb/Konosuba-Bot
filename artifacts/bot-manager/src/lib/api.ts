@@ -1,163 +1,154 @@
-export const API_BASE = (import.meta.env.VITE_BOT_API_URL as string) || 'https://konosuba-api.onrender.com';
+const API_ORIGIN: string = (import.meta.env.VITE_API_URL as string | undefined) || '';
+const BASE = `${API_ORIGIN}/api/website`;
 
-async function apiFetch(path: string, options?: RequestInit) {
-  const res = await fetch(`${API_BASE}${path}`, options);
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.message || data.error || `Request failed: ${res.status}`);
-  return data;
+export function getStoredKey(): string {
+  try { return localStorage.getItem('adminKey') || ''; } catch { return ''; }
 }
 
-// ── Bot management ────────────────────────────────────────────────────────────
+function adminHeaders(): Record<string, string> {
+  return {
+    'Content-Type': 'application/json',
+    'x-admin-key':  getStoredKey(),
+  };
+}
 
-export async function apiFetchBots(adminPassword: string) {
-  return apiFetch('/api/bots', {
-    headers: { 'x-admin-password': adminPassword },
+async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    ...opts,
+    headers: { ...adminHeaders(), ...(opts.headers || {}) },
   });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(err.error || 'Request failed');
+  }
+  return res.json() as Promise<T>;
 }
 
-export async function apiAddBot(adminPassword: string, payload: { botName: string; phoneNumber: string; avatarData?: string }) {
-  // POST /api/bots (primary endpoint, also handles /api/bots/add as alias)
-  return apiFetch('/api/bots', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-admin-password': adminPassword },
-    body: JSON.stringify({
-      name:        payload.botName,
-      botName:     payload.botName,
-      phone:       payload.phoneNumber,
-      phoneNumber: payload.phoneNumber,
-      avatarData:  payload.avatarData,
-    }),
-  });
-}
-
-export async function apiGetPairingCode(adminPassword: string, botId: string) {
-  // POST /api/bots/:id/pairing-code
-  return apiFetch(`/api/bots/${botId}/pairing-code`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-admin-password': adminPassword },
-  });
-}
-
-export async function apiDeleteBot(adminPassword: string, botId: string) {
-  return apiFetch(`/api/bots/${botId}`, {
-    method: 'DELETE',
-    headers: { 'x-admin-password': adminPassword },
-  });
-}
-
-export async function apiRestartBot(adminPassword: string, botId: string) {
-  return apiFetch(`/api/bots/${botId}/restart`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-admin-password': adminPassword },
-  });
-}
-
-export async function apiFetchBotLogs(adminPassword: string, botId: string) {
-  return apiFetch(`/api/bots/${botId}/logs`, {
-    headers: { 'x-admin-password': adminPassword },
-  });
-}
-
-// ── User management ───────────────────────────────────────────────────────────
-
-export interface UserRecord {
+export interface AdminUser {
+  _id: string;
   phone: string;
-  name?: string;
-  username?: string;
-  wallet?: number;
-  bank?: number;
-  totalBalance?: number;
-  level?: number;
-  xp?: number;
-  streak?: number;
-  class?: string;
-  guild?: string | null;
-  registered?: boolean;
-  banned?: boolean;
-  achievements?: number;
+  jid?: string;
+  lid?: string;
+  name: string;
+  wallet: number;
+  bank: number;
+  bankLimit: number;
+  netWorth: number;
+  level: number;
+  xp: number;
+  banned: boolean;
+  isMod: boolean;
+  isAdmin: boolean;
+  warnings: number;
+  registered: boolean;
   createdAt?: string;
   updatedAt?: string;
+  inventory?: { item: string; qty: number }[];
+  cooldowns?: Record<string, string>;
 }
 
-export async function apiFetchUsers(adminPassword: string, page = 1, limit = 50, search = '') {
-  const params = new URLSearchParams({ page: String(page), limit: String(limit) });
-  if (search) params.set('search', search);
-  return apiFetch(`/api/admin/users?${params}`, {
-    headers: { 'x-admin-password': adminPassword },
-  });
+export interface PaginationInfo { page: number; limit: number; total: number; pages: number; }
+
+export interface DuplicateUser {
+  _id: string; jid?: string; lid?: string; phone: string; name: string;
+  wallet: number; bank: number; level: number; xp: number; banned: boolean; createdAt?: string;
 }
 
-export async function apiSearchUser(adminPassword: string, phone: string) {
-  return apiFetch(`/api/admin/users/search?phone=${encodeURIComponent(phone)}`, {
-    headers: { 'x-admin-password': adminPassword },
-  });
+export interface DuplicateGroup { phone: string; count: number; users: DuplicateUser[]; }
+
+export interface MigrationResult {
+  success: boolean; normalized: number; alreadySet: number; lidOnly: number;
+  conflicts: number; conflictList: { phone: string; userA: string; userB: string }[]; message: string;
 }
 
-export async function apiEditUser(adminPassword: string, payload: { phone: string; wallet?: number; bank?: number; level?: number; xp?: number; streak?: number }) {
-  return apiFetch('/api/admin/edit-user', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-admin-password': adminPassword },
-    body: JSON.stringify(payload),
-  });
+export interface BotEntry {
+  _id: string; botId: string; name: string; phone: string;
+  avatarData?: string; createdAt: string;
+  status?: 'connected' | 'offline' | 'pending' | 'disconnected' | 'stopped' | 'reconnecting' | 'error';
 }
 
-export async function apiBanUser(adminPassword: string, phone: string, banned: boolean) {
-  return apiFetch('/api/admin/ban-user', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-admin-password': adminPassword },
-    body: JSON.stringify({ phone, banned }),
-  });
+export interface PairingResult {
+  success: boolean; botId: string; pairingCode?: string;
+  status: 'pending' | 'already_connected'; message?: string;
 }
 
-export async function apiResetUserCooldowns(adminPassword: string, phone: string) {
-  return apiFetch('/api/admin/reset-cooldowns', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-admin-password': adminPassword },
-    body: JSON.stringify({ phone }),
-  });
+export interface PairingStatus {
+  status: 'pending' | 'connected' | 'disconnected' | 'not_found';
+  pairingCode?: string; phone?: string;
 }
 
-export async function apiResetUser(adminPassword: string, phone: string) {
-  return apiFetch('/api/admin/reset-user', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-admin-password': adminPassword },
-    body: JSON.stringify({ phone }),
-  });
-}
+export interface BotLog { ts: string; msg: string; }
 
-export async function apiDeleteUser(adminPassword: string, phone: string) {
-  return apiFetch('/api/admin/delete-user', {
-    method: 'DELETE',
-    headers: { 'Content-Type': 'application/json', 'x-admin-password': adminPassword },
-    body: JSON.stringify({ phone }),
-  });
-}
+export const adminApi = {
+  // ── Stats ──────────────────────────────────────────────────────────────────
+  getStats: () => request<Record<string, unknown>>('/stats'),
 
-export async function apiDeleteAllUsers(adminPassword: string) {
-  return apiFetch('/api/admin/reset-users', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-admin-password': adminPassword },
-    body: JSON.stringify({ confirm: 'YES_DELETE_ALL_DATA' }),
-  });
-}
+  // ── Users ──────────────────────────────────────────────────────────────────
+  listUsers: (page = 1, limit = 20, search = '') =>
+    request<{ users: AdminUser[]; pagination: PaginationInfo }>(
+      `/admin/users?page=${page}&limit=${limit}&search=${encodeURIComponent(search)}`
+    ),
 
-export async function apiMergeUsers(adminPassword: string, sourcePhone: string, targetPhone: string) {
-  return apiFetch('/api/admin/merge-users', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-admin-password': adminPassword },
-    body: JSON.stringify({ sourcePhone, targetPhone }),
-  });
-}
+  getUser: (phone: string) => request<AdminUser>(`/admin/user/${phone}`),
 
-export function fileToBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload  = () => resolve(reader.result as string);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
+  editUser: (phone: string, data: Partial<AdminUser>) =>
+    request<{ success: boolean; user: AdminUser }>('/admin/edit-user', {
+      method: 'PUT', body: JSON.stringify({ phone, ...data }),
+    }),
 
-export function formatMoney(n: number) {
-  return '$' + Number(n || 0).toLocaleString('en-US');
-}
+  banUser:   (phone: string) => request<{ success: boolean }>('/admin/ban-user',   { method: 'POST', body: JSON.stringify({ phone }) }),
+  unbanUser: (phone: string) => request<{ success: boolean }>('/admin/unban-user', { method: 'POST', body: JSON.stringify({ phone }) }),
+
+  resetCooldowns: (phone: string) =>
+    request<{ success: boolean }>('/admin/reset-cooldowns', { method: 'POST', body: JSON.stringify({ phone }) }),
+
+  deleteUser: (phone: string) =>
+    request<{ success: boolean }>('/admin/delete-user', { method: 'DELETE', body: JSON.stringify({ phone }) }),
+
+  // ── Global wipes ───────────────────────────────────────────────────────────
+  wipeEconomy:   () => request<{ success: boolean; message: string }>('/admin/wipe-economy',   { method: 'POST' }),
+  wipeXP:        () => request<{ success: boolean; message: string }>('/admin/wipe-xp',        { method: 'POST' }),
+  wipeInventory: () => request<{ success: boolean; message: string }>('/admin/wipe-inventory', { method: 'POST' }),
+
+  exportUsers: () => {
+    const key = encodeURIComponent(getStoredKey());
+    const a = document.createElement('a');
+    a.href = `${BASE}/admin/export-users?adminKey=${key}`;
+    a.download = 'users.csv';
+    a.click();
+  },
+
+  // ── Duplicate detection & merge ────────────────────────────────────────────
+  detectDuplicates: () =>
+    request<{ duplicates: DuplicateGroup[]; totalGroups: number }>('/admin/detect-duplicates'),
+
+  mergeUsers: (primaryPhone: string, secondaryPhone: string) =>
+    request<{ success: boolean; merged: string; deleted: string; summary: Record<string, unknown> }>(
+      '/admin/merge-users', { method: 'POST', body: JSON.stringify({ primaryPhone, secondaryPhone }) }
+    ),
+
+  // ── Migration ──────────────────────────────────────────────────────────────
+  runMigration: () => request<MigrationResult>('/admin/run-migration', { method: 'POST' }),
+
+  // ── Bots ───────────────────────────────────────────────────────────────────
+  listBots: () => request<{ bots: BotEntry[] }>('/admin/bots'),
+
+  startPairing: (phone: string, name: string) =>
+    request<PairingResult>('/admin/bots/start-pairing', { method: 'POST', body: JSON.stringify({ phone, name }) }),
+
+  getPairingStatus: (botId: string) =>
+    request<PairingStatus>(`/admin/bots/pairing-status/${encodeURIComponent(botId)}`),
+
+  // NEW: restart, stop, logs
+  restartBot: (botId: string) =>
+    request<{ success: boolean; message: string }>(`/admin/bots/${encodeURIComponent(botId)}/restart`, { method: 'POST' }),
+
+  stopBot: (botId: string) =>
+    request<{ success: boolean; message: string }>(`/admin/bots/${encodeURIComponent(botId)}/stop`, { method: 'POST' }),
+
+  getBotLogs: (botId: string) =>
+    request<{ logs: BotLog[] }>(`/admin/bots/${encodeURIComponent(botId)}/logs`),
+
+  deleteBot: (botId: string) =>
+    request<{ success: boolean }>(`/admin/bots/${encodeURIComponent(botId)}`, { method: 'DELETE' }),
+};

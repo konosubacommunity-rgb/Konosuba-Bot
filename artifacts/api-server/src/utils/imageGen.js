@@ -1,14 +1,10 @@
-// Image generation stubs
-// These functions optionally generate image buffers for profile/balance cards.
-// Returning null causes the caller to fall back to text-only responses,
-// which is safe — all call sites already handle a null return value.
-
-async function generateProfileCard(_user, _avatarUrl) {
+/**
+ * utils/imageGen.js
+ * Stub — returns null (bot falls back to text-only profile cards).
+ * Replace with canvas/jimp implementation when needed.
+ */
+async function generateProfileCard(user, avatarUrl) {
   return null;
 }
 
-async function generateBalanceCard(_user) {
-  return null;
-}
-
-module.exports = { generateProfileCard, generateBalanceCard };
+module.exports = { generateProfileCard };
