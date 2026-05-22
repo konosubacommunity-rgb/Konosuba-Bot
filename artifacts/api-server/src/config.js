@@ -1,4 +1,4 @@
-const ownerNumbersEnv = process.env.OWNER_NUMBERS || '12232838631673';
+const ownerNumbersEnv = process.env.OWNER_NUMBERS || '';
 const ownerNumbersList = ownerNumbersEnv
   .split(',')
   .map(n => n.trim())
@@ -6,10 +6,10 @@ const ownerNumbersList = ownerNumbersEnv
 
 module.exports = {
   OWNER_NUMBERS: ownerNumbersList,
-  OWNER_JID: ownerNumbersList.length > 0 ? `${ownerNumbersList[0]}@s.whatsapp.net` : '12232838631673@s.whatsapp.net',
-  BOT_NAME: 'Aqua',
+  OWNER_JID: ownerNumbersList.length > 0 ? `${ownerNumbersList[0]}@s.whatsapp.net` : '',
+  BOT_NAME: process.env.BOT_NAME || 'Aqua',
   COMMUNITY: 'KONOSUBA',
-  PREFIX: '.',
+  PREFIX: process.env.PREFIX || '.',
   MONGO_URI: process.env.MONGO_URI || '',
   COOLDOWNS: {
     daily: 24 * 60 * 60 * 1000,

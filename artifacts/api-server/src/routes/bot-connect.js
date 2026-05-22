@@ -7,7 +7,7 @@ const WEBHOOK_SECRET = process.env.BOT_WEBHOOK_SECRET || '';
 
 function adminAuth(req, res, next) {
   const key = req.headers['x-admin-key'] || req.query.adminKey;
-  if (key !== ADMIN_PASSWORD && key !== WEBHOOK_SECRET) {
+  if (!key || (key !== ADMIN_PASSWORD && (!WEBHOOK_SECRET || key !== WEBHOOK_SECRET))) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
   next();
@@ -51,8 +51,9 @@ router.post('/admin/bots/start-pairing', adminAuth, async (req, res) => {
   }
 
   try {
-    const { phone, name } = req.body;
+    const { phone, name, avatarData } = req.body || {};
     if (!phone) return res.status(400).json({ error: 'Phone number required' });
+    if (!name || !name.trim()) return res.status(400).json({ error: 'Bot name is required' });
 
     const cleanPhone = String(phone).replace(/[^\d]/g, '');
     if (cleanPhone.length < 7) return res.status(400).json({ error: 'Invalid phone number' });
@@ -74,11 +75,11 @@ router.post('/admin/bots/start-pairing', adminAuth, async (req, res) => {
     if (state.creds && state.creds.registered) {
       await BotConfig.findOneAndUpdate(
         { botId },
-        { $set: { botId, name: name || `Bot ${cleanPhone}`, phone: cleanPhone, createdAt: new Date().toISOString() } },
+        { $set: { botId, name: name.trim(), phone: cleanPhone, createdAt: new Date().toISOString(), ...(avatarData ? { avatarData } : {}) } },
         { upsert: true }
       );
-      activeSessions[botId] = { status: 'connected', phone: cleanPhone, name, logs: [] };
-      await attachMessageHandler(botId, null, cleanPhone, name);
+      activeSessions[botId] = { status: 'connected', phone: cleanPhone, name: name.trim(), logs: [] };
+      await attachMessageHandler(botId, null, cleanPhone, name.trim());
       return res.json({ success: true, botId, status: 'already_connected', message: 'Bot is already linked to WhatsApp.' });
     }
 
@@ -90,7 +91,7 @@ router.post('/admin/bots/start-pairing', adminAuth, async (req, res) => {
       browser: ['Konosuba Bot', 'Chrome', '120.0.0'],
     });
 
-    activeSessions[botId] = { sock, status: 'pending', phone: cleanPhone, name, pairingCode: null, logs: [] };
+    activeSessions[botId] = { sock, status: 'pending', phone: cleanPhone, name: name.trim(), pairingCode: null, logs: [] };
     addLog(botId, `Pairing session started for ${cleanPhone}`);
 
     sock.ev.on('creds.update', saveCreds);
@@ -102,11 +103,11 @@ router.post('/admin/bots/start-pairing', adminAuth, async (req, res) => {
         addLog(botId, 'Bot connected to WhatsApp');
         await BotConfig.findOneAndUpdate(
           { botId },
-          { $set: { botId, name: name || `Bot ${cleanPhone}`, phone: cleanPhone, createdAt: new Date().toISOString() } },
+          { $set: { botId, name: name.trim(), phone: cleanPhone, createdAt: new Date().toISOString(), ...(avatarData ? { avatarData } : {}) } },
           { upsert: true }
         );
         // Wire up message handler now that we are connected
-        attachMessageHandler(botId, sock, cleanPhone, name);
+        attachMessageHandler(botId, sock, cleanPhone, name.trim());
       } else if (connection === 'close') {
         const code = lastDisconnect?.error?.output?.statusCode;
         activeSessions[botId].status = 'disconnected';
@@ -114,7 +115,7 @@ router.post('/admin/bots/start-pairing', adminAuth, async (req, res) => {
         // Auto-reconnect unless logged out (401)
         if (code !== 401) {
           addLog(botId, 'Attempting reconnect in 5s...');
-          setTimeout(() => reconnectBot(botId, bail, cleanPhone, name), 5000);
+          setTimeout(() => reconnectBot(botId, bail, cleanPhone, name.trim()), 5000);
         }
       }
     });

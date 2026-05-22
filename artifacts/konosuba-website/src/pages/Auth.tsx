@@ -34,12 +34,21 @@ export default function Auth() {
     e.preventDefault(); setError(''); setLoading(true);
     try {
       const cleanPhone = phone.replace(/\D/g, '');
-      if (!cleanPhone || cleanPhone.length < 7) { setError('Enter a valid phone number with country code'); setLoading(false); return; }
+      if (!cleanPhone || cleanPhone.length < 7) {
+        setError('Enter a valid phone number with country code');
+        setLoading(false);
+        return;
+      }
+      if (!password) {
+        setError('Password is required');
+        setLoading(false);
+        return;
+      }
       let res;
       if (mode === 'login') {
-        res = await api.login(cleanPhone, password || undefined);
+        res = await api.login(cleanPhone, password);
       } else {
-        res = await api.register(cleanPhone, password || undefined, name || undefined);
+        res = await api.register(cleanPhone, password, name || undefined);
       }
       setToken(res.token);
       setCurrentUser(res.user as Record<string, unknown>);
@@ -146,10 +155,10 @@ export default function Auth() {
           </div>
 
           <div className="auth-tabs">
-            <button className={`auth-tab${mode === 'login' ? ' active' : ''}`} onClick={() => { setMode('login'); setError(''); }}>
+            <button className={`auth-tab${mode === 'login' ? ' active' : ''}`} onClick={() => { setMode('login'); setError(''); setPassword(''); }}>
               Login
             </button>
-            <button className={`auth-tab${mode === 'register' ? ' active' : ''}`} onClick={() => { setMode('register'); setError(''); }}>
+            <button className={`auth-tab${mode === 'register' ? ' active' : ''}`} onClick={() => { setMode('register'); setError(''); setPassword(''); }}>
               Register
             </button>
           </div>
@@ -166,8 +175,8 @@ export default function Auth() {
               <input className="form-input" type="tel" placeholder="e.g. 2348012345678 (with country code)" value={phone} onChange={e => setPhone(e.target.value)} required />
             </div>
             <div className="form-group">
-              <label className="form-label">Password (optional)</label>
-              <input className="form-input" type="password" placeholder="Leave blank for phone-only login" value={password} onChange={e => setPassword(e.target.value)} />
+              <label className="form-label">Password</label>
+              <input className="form-input" type="password" placeholder="Enter your password" value={password} onChange={e => setPassword(e.target.value)} required />
             </div>
 
             {error && <div className="auth-error">⚠ {error}</div>}

@@ -18,10 +18,20 @@ async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
     headers: { ...adminHeaders(), ...(opts.headers || {}) },
   });
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(err.error || 'Request failed');
+    let errMsg = res.statusText || 'Request failed';
+    try {
+      const body = await res.json();
+      errMsg = body.error || body.message || errMsg;
+    } catch {}
+    throw new Error(errMsg);
   }
-  return res.json() as Promise<T>;
+  const text = await res.text();
+  if (!text) throw new Error('Empty response from server');
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new Error('Invalid JSON response from server');
+  }
 }
 
 export interface AdminUser {
@@ -133,13 +143,15 @@ export const adminApi = {
   // ── Bots ───────────────────────────────────────────────────────────────────
   listBots: () => request<{ bots: BotEntry[] }>('/admin/bots'),
 
-  startPairing: (phone: string, name: string) =>
-    request<PairingResult>('/admin/bots/start-pairing', { method: 'POST', body: JSON.stringify({ phone, name }) }),
+  startPairing: (phone: string, name: string, avatarData?: string) =>
+    request<PairingResult>('/admin/bots/start-pairing', {
+      method: 'POST',
+      body: JSON.stringify({ phone, name, ...(avatarData ? { avatarData } : {}) }),
+    }),
 
   getPairingStatus: (botId: string) =>
     request<PairingStatus>(`/admin/bots/pairing-status/${encodeURIComponent(botId)}`),
 
-  // NEW: restart, stop, logs
   restartBot: (botId: string) =>
     request<{ success: boolean; message: string }>(`/admin/bots/${encodeURIComponent(botId)}/restart`, { method: 'POST' }),
 

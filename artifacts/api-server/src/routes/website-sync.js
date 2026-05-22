@@ -11,7 +11,7 @@ const WEBHOOK_SECRET = process.env.BOT_WEBHOOK_SECRET || '';
 
 function adminAuth(req, res, next) {
   const key = req.headers['x-admin-key'] || req.query.adminKey;
-  if (key !== ADMIN_PASSWORD && key !== WEBHOOK_SECRET) {
+  if (!key || (key !== ADMIN_PASSWORD && (!WEBHOOK_SECRET || key !== WEBHOOK_SECRET))) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
   next();
@@ -34,24 +34,26 @@ function userAuth(req, res, next) {
 // POST /api/website/auth/login
 router.post('/auth/login', async (req, res) => {
   try {
-    const { phone, password } = req.body;
+    const { phone, password } = req.body || {};
     if (!phone) return res.status(400).json({ error: 'Phone number required' });
+    if (!password) return res.status(400).json({ error: 'Password required' });
 
     const cleanPhone = String(phone).replace(/\D/g, '');
     if (!cleanPhone) return res.status(400).json({ error: 'Invalid phone number' });
 
-    // FIX: use findByPhone which checks the indexed `phone` field first,
-    // then JID, then LID — correctly handles LID-only users
     const user = await User.findByPhone(cleanPhone);
 
     if (!user) {
-      return res.status(404).json({ error: 'User not found. Please use the bot first.' });
+      return res.status(404).json({ error: 'User not found. Please use the bot first or register.' });
     }
     if (user.banned) return res.status(403).json({ error: 'Your account is banned.' });
 
     if (user.password) {
-      if (!password) return res.status(400).json({ error: 'Password required' });
       if (password !== user.password) return res.status(401).json({ error: 'Wrong password' });
+    } else {
+      // First time logging in with password — set it
+      user.password = password;
+      await user.save();
     }
 
     const token = jwt.sign(
@@ -61,7 +63,7 @@ router.post('/auth/login', async (req, res) => {
     );
     res.json({ token, user: serializeUser(user) });
   } catch (err) {
-    req.log ? req.log.error({ err }, 'Login error') : console.error('Login error:', err);
+    console.error('Login error:', err);
     res.status(500).json({ error: 'Server error' });
   }
 });
@@ -69,18 +71,22 @@ router.post('/auth/login', async (req, res) => {
 // POST /api/website/auth/register
 router.post('/auth/register', async (req, res) => {
   try {
-    const { phone, password, name } = req.body;
+    const { phone, password, name } = req.body || {};
     if (!phone) return res.status(400).json({ error: 'Phone number required' });
+    if (!password) return res.status(400).json({ error: 'Password is required' });
 
     const cleanPhone = String(phone).replace(/\D/g, '');
+    if (!cleanPhone || cleanPhone.length < 7) {
+      return res.status(400).json({ error: 'Invalid phone number' });
+    }
 
-    // FIX: use findByPhone instead of raw findOne({jid})
     let user = await User.findByPhone(cleanPhone);
 
     if (user) {
-      if (user.password && password) {
-        if (password !== user.password) return res.status(401).json({ error: 'Wrong password' });
-      } else if (password) {
+      // Existing user (from bot) — set or verify password
+      if (user.password) {
+        if (password !== user.password) return res.status(401).json({ error: 'Wrong password. If you already have an account, use Login instead.' });
+      } else {
         user.password = password;
       }
       if (name) user.name = name;
@@ -104,7 +110,7 @@ router.post('/auth/register', async (req, res) => {
     );
     res.json({ token, user: serializeUser(user) });
   } catch (err) {
-    req.log ? req.log.error({ err }, 'Register error') : console.error('Register error:', err);
+    console.error('Register error:', err);
     res.status(500).json({ error: 'Server error' });
   }
 });
@@ -180,7 +186,6 @@ router.get('/leaderboard', async (req, res) => {
 
     const result = users.map((u, i) => {
       const netWorth = (u.wallet || 0) + (u.bank || 0);
-      // FIX: prefer stored phone field, fall back to deriving from JID/LID
       const phone = u.phone || (u.jid ? u.jid.split('@')[0] : (u.lid ? u.lid.split('@')[0] : ''));
       return {
         rank:         i + 1,
@@ -270,7 +275,7 @@ router.get('/admin/user/:phone', adminAuth, async (req, res) => {
 
 router.put('/admin/edit-user', adminAuth, async (req, res) => {
   try {
-    const { phone, wallet, bank, bankLimit, level, xp, isMod, isAdmin, name } = req.body;
+    const { phone, wallet, bank, bankLimit, level, xp, isMod, isAdmin, name } = req.body || {};
     if (!phone) return res.status(400).json({ error: 'Phone required' });
 
     const user = await User.findByPhone(String(phone).replace(/\D/g, ''));
@@ -294,7 +299,7 @@ router.put('/admin/edit-user', adminAuth, async (req, res) => {
 
 router.post('/admin/ban-user', adminAuth, async (req, res) => {
   try {
-    const { phone } = req.body;
+    const { phone } = req.body || {};
     const user = await User.findByPhone(String(phone).replace(/\D/g, ''));
     if (!user) return res.status(404).json({ error: 'User not found' });
     user.banned = true;
@@ -307,7 +312,7 @@ router.post('/admin/ban-user', adminAuth, async (req, res) => {
 
 router.post('/admin/unban-user', adminAuth, async (req, res) => {
   try {
-    const { phone } = req.body;
+    const { phone } = req.body || {};
     const user = await User.findByPhone(String(phone).replace(/\D/g, ''));
     if (!user) return res.status(404).json({ error: 'User not found' });
     user.banned = false;
@@ -320,7 +325,7 @@ router.post('/admin/unban-user', adminAuth, async (req, res) => {
 
 router.post('/admin/reset-cooldowns', adminAuth, async (req, res) => {
   try {
-    const { phone } = req.body;
+    const { phone } = req.body || {};
     const user = await User.findByPhone(String(phone).replace(/\D/g, ''));
     if (!user) return res.status(404).json({ error: 'User not found' });
     user.cooldowns = new Map();
@@ -333,7 +338,7 @@ router.post('/admin/reset-cooldowns', adminAuth, async (req, res) => {
 
 router.delete('/admin/delete-user', adminAuth, async (req, res) => {
   try {
-    const phone = (req.body.phone || req.query.phone || '').replace(/\D/g, '');
+    const phone = ((req.body || {}).phone || req.query.phone || '').replace(/\D/g, '');
     if (!phone) return res.status(400).json({ error: 'Phone required' });
     const user = await User.findByPhone(phone);
     if (!user) return res.status(404).json({ error: 'User not found' });
@@ -403,7 +408,7 @@ router.post('/bot-event', async (req, res) => {
   if (WEBHOOK_SECRET && secret !== WEBHOOK_SECRET) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
-  const { event, data } = req.body;
+  const { event, data } = req.body || {};
   if (!event || !data) return res.status(400).json({ error: 'Missing event or data' });
 
   try {
@@ -417,7 +422,7 @@ router.post('/bot-event', async (req, res) => {
     }
     res.json({ ok: true });
   } catch (err) {
-    req.log ? req.log.error({ err }, 'Webhook error') : console.error('Webhook error:', err);
+    console.error('Webhook error:', err);
     res.status(500).json({ error: 'Server error' });
   }
 });
@@ -426,9 +431,6 @@ router.post('/bot-event', async (req, res) => {
 
 function serializeUser(user) {
   const obj = user.toObject ? user.toObject() : user;
-  // FIX: use the stored `phone` field first — it is the canonical identity.
-  // Deriving from JID was the root cause of the infinite loading bug when
-  // jid was null (LID-only users) and phone came back as ''.
   const phone = obj.phone ||
     (obj.jid ? obj.jid.split('@')[0] : '') ||
     (obj.lid ? obj.lid.split('@')[0] : '');

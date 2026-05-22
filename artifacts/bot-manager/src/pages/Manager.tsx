@@ -65,12 +65,15 @@ export default function Manager() {
   const [showAddBot, setShowAddBot]   = useState(false);
   const [botPhone, setBotPhone]       = useState('');
   const [botName, setBotName]         = useState('');
+  const [botAvatar, setBotAvatar]     = useState<string>('');
+  const [botAvatarPreview, setBotAvatarPreview] = useState<string>('');
   const [pairingLoading, setPairingLoading] = useState(false);
   const [activePairing, setActivePairing]   = useState<{ botId: string; code: string } | null>(null);
   const [pairStatus, setPairStatus]         = useState<PairingStatus['status'] | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const avatarInputRef = useRef<HTMLInputElement | null>(null);
 
-  // NEW: logs modal state
+  // logs modal state
   const [logsBot, setLogsBot]     = useState<BotEntry | null>(null);
   const [botLogs, setBotLogs]     = useState<BotLog[]>([]);
   const [logsLoading, setLogsLoading] = useState(false);
@@ -89,6 +92,19 @@ export default function Manager() {
     localStorage.setItem('adminKey', keyInput.trim()); setAuthed(true);
   }
   function logout() { localStorage.removeItem('adminKey'); setAuthed(false); setKeyInput(''); }
+
+  function handleAvatarChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) { showToast('❌ Image must be under 2MB'); return; }
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const dataUrl = ev.target?.result as string;
+      setBotAvatar(dataUrl);
+      setBotAvatarPreview(dataUrl);
+    };
+    reader.readAsDataURL(file);
+  }
 
   const loadStats = useCallback(async () => {
     if (!authed) return;
@@ -119,12 +135,13 @@ export default function Manager() {
 
   const startPairing = useCallback(async () => {
     if (!botPhone.trim()) return;
+    if (!botName.trim()) { showToast('❌ Bot name is required'); return; }
     setPairingLoading(true);
     try {
-      const res = await adminApi.startPairing(botPhone.trim(), botName.trim() || `Bot ${botPhone.trim()}`);
+      const res = await adminApi.startPairing(botPhone.trim(), botName.trim(), botAvatar || undefined);
       if (res.status === 'already_connected') {
         showToast('✅ Bot is already connected!');
-        setShowAddBot(false); setBotPhone(''); setBotName('');
+        setShowAddBot(false); setBotPhone(''); setBotName(''); setBotAvatar(''); setBotAvatarPreview('');
         loadBots(); return;
       }
       if (res.pairingCode) {
@@ -145,9 +162,8 @@ export default function Manager() {
     } catch (e: unknown) {
       showToast('❌ ' + (e instanceof Error ? e.message : 'Pairing failed'));
     } finally { setPairingLoading(false); }
-  }, [botPhone, botName, loadBots, stopPolling]);
+  }, [botPhone, botName, botAvatar, loadBots, stopPolling]);
 
-  // NEW: open logs modal
   const openLogs = useCallback(async (bot: BotEntry) => {
     setLogsBot(bot); setBotLogs([]); setLogsLoading(true);
     try {
@@ -344,7 +360,7 @@ export default function Manager() {
         </div>
       )}
 
-      {/* ── NEW: BOT LOGS MODAL ────────────────────────────────────────────────── */}
+      {/* BOT LOGS MODAL */}
       {logsBot && (
         <div className="modal-overlay" onClick={() => setLogsBot(null)}>
           <div className="modal-box" style={{ maxWidth: 680, maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}
@@ -386,15 +402,13 @@ export default function Manager() {
       {/* SIDEBAR */}
       <aside className={`sidebar${collapsed ? ' collapsed' : ''}`}>
         <a href="/" className="sidebar-brand">
-          <div className="sidebar-logo">🤖</div>
-          <span>KONOSUBA</span>
+          {collapsed ? '⚔' : '⚔ KONOSUBA'}
         </a>
         <nav className="sidebar-nav">
-          <div className="sidebar-section-title">Control Panel</div>
-          {NAV.map(item => (
-            <button key={item.id} className={`sidebar-item${tab === item.id ? ' active' : ''}`} onClick={() => setTab(item.id)}>
-              <span className="sidebar-icon">{item.icon}</span>
-              <span className="sidebar-label">{item.label}</span>
+          {NAV.map(n => (
+            <button key={n.id} className={`nav-item${tab === n.id ? ' active' : ''}`} onClick={() => setTab(n.id)}>
+              <span className="nav-icon">{n.icon}</span>
+              {!collapsed && <span className="nav-label">{n.label}</span>}
             </button>
           ))}
         </nav>
@@ -676,41 +690,70 @@ export default function Manager() {
                 </div>
                 <div style={{ display: 'flex', gap: '0.75rem' }}>
                   <button className="m-btn m-btn-ghost" onClick={loadBots} disabled={botsLoading}>↻ Refresh</button>
-                  <button className="m-btn m-btn-primary" onClick={() => { setShowAddBot(true); setActivePairing(null); setPairStatus(null); setBotPhone(''); setBotName(''); }}>+ Add Bot</button>
+                  <button className="m-btn m-btn-primary" onClick={() => { setShowAddBot(true); setActivePairing(null); setPairStatus(null); setBotPhone(''); setBotName(''); setBotAvatar(''); setBotAvatarPreview(''); }}>+ Add Bot</button>
                 </div>
               </div>
 
               {/* ADD BOT MODAL */}
               {showAddBot && (
                 <div className="modal-overlay">
-                  <div className="modal-box" style={{ maxWidth: 500 }}>
+                  <div className="modal-box" style={{ maxWidth: 520 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
                       <h3 className="modal-title" style={{ marginBottom: 0 }}>🤖 Add New Bot</h3>
                       <button style={{ background: 'none', border: 'none', color: 'var(--text-dim)', fontSize: '1.5rem', cursor: 'pointer' }}
-                        onClick={() => { setShowAddBot(false); setActivePairing(null); setPairStatus(null); stopPolling(); }}>×</button>
+                        onClick={() => { setShowAddBot(false); setActivePairing(null); setPairStatus(null); stopPolling(); setBotAvatar(''); setBotAvatarPreview(''); }}>×</button>
                     </div>
                     {!activePairing ? (
                       <>
                         <div className="info-box" style={{ marginBottom: '1.25rem' }}>
-                          Enter the WhatsApp phone number for your bot. The server will request a pairing code from WhatsApp — enter it in your phone to link the bot.
+                          Enter the bot's phone number, name, and optional profile picture. The server will generate a pairing code — enter it in WhatsApp to link the bot.
                         </div>
+
+                        {/* Profile picture upload */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem', marginBottom: '1.25rem', padding: '1rem', background: 'rgba(0,0,0,0.3)', borderRadius: 12, border: '1px solid rgba(255,255,255,0.06)' }}>
+                          <div
+                            style={{ width: 72, height: 72, borderRadius: '50%', overflow: 'hidden', border: '2px solid rgba(0,212,255,0.3)', background: 'rgba(0,0,20,0.8)', flexShrink: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.8rem' }}
+                            onClick={() => avatarInputRef.current?.click()}
+                          >
+                            {botAvatarPreview
+                              ? <img src={botAvatarPreview} alt="Bot avatar" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                              : '🤖'
+                            }
+                          </div>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-dim)', marginBottom: '0.4rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Profile Picture <span style={{ color: 'var(--text-muted)', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>(optional)</span></div>
+                            <div style={{ display: 'flex', gap: '0.5rem' }}>
+                              <button type="button" className="m-btn m-btn-ghost m-btn-sm" onClick={() => avatarInputRef.current?.click()}>
+                                {botAvatarPreview ? '🔄 Change' : '📷 Upload'}
+                              </button>
+                              {botAvatarPreview && (
+                                <button type="button" className="m-btn m-btn-ghost m-btn-sm" style={{ color: '#fca5a5' }} onClick={() => { setBotAvatar(''); setBotAvatarPreview(''); if (avatarInputRef.current) avatarInputRef.current.value = ''; }}>
+                                  ✕ Remove
+                                </button>
+                              )}
+                            </div>
+                            <div style={{ color: 'var(--text-muted)', fontSize: '0.72rem', marginTop: '0.3rem' }}>JPG, PNG, WebP · Max 2MB</div>
+                          </div>
+                          <input ref={avatarInputRef} type="file" accept="image/jpeg,image/png,image/webp" style={{ display: 'none' }} onChange={handleAvatarChange} />
+                        </div>
+
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginBottom: '1.5rem' }}>
+                          <div>
+                            <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-dim)', marginBottom: '0.4rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Bot Name *</label>
+                            <input className="m-input" type="text" placeholder="e.g. Konosuba Bot" value={botName} onChange={e => setBotName(e.target.value)} />
+                          </div>
                           <div>
                             <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-dim)', marginBottom: '0.4rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Bot Phone Number *</label>
                             <input className="m-input" type="tel" placeholder="e.g. 2348012345678 (with country code, no +)"
                               value={botPhone} onChange={e => setBotPhone(e.target.value)} onKeyDown={e => e.key === 'Enter' && startPairing()} />
                             <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginTop: '0.3rem' }}>Include country code. No spaces or +.</div>
                           </div>
-                          <div>
-                            <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-dim)', marginBottom: '0.4rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Bot Name (optional)</label>
-                            <input className="m-input" type="text" placeholder="e.g. Konosuba Bot" value={botName} onChange={e => setBotName(e.target.value)} />
-                          </div>
                         </div>
                         <div style={{ display: 'flex', gap: '0.75rem' }}>
-                          <button className="m-btn m-btn-primary" style={{ flex: 1, justifyContent: 'center' }} disabled={pairingLoading || !botPhone.trim()} onClick={startPairing}>
+                          <button className="m-btn m-btn-primary" style={{ flex: 1, justifyContent: 'center' }} disabled={pairingLoading || !botPhone.trim() || !botName.trim()} onClick={startPairing}>
                             {pairingLoading ? '⏳ Requesting code…' : '🔗 Get Pairing Code'}
                           </button>
-                          <button className="m-btn m-btn-ghost" onClick={() => setShowAddBot(false)}>Cancel</button>
+                          <button className="m-btn m-btn-ghost" onClick={() => { setShowAddBot(false); setBotAvatar(''); setBotAvatarPreview(''); }}>Cancel</button>
                         </div>
                       </>
                     ) : (
@@ -721,7 +764,7 @@ export default function Manager() {
                             <div style={{ fontWeight: 700, fontSize: '1.1rem' }}>Bot Connected!</div>
                             <div style={{ color: 'var(--text-dim)', fontSize: '0.88rem', marginTop: '0.5rem' }}>Your bot is now linked and active.</div>
                             <button className="m-btn m-btn-primary" style={{ marginTop: '1.5rem', justifyContent: 'center' }}
-                              onClick={() => { setShowAddBot(false); setActivePairing(null); setPairStatus(null); loadBots(); }}>Done</button>
+                              onClick={() => { setShowAddBot(false); setActivePairing(null); setPairStatus(null); setBotAvatar(''); setBotAvatarPreview(''); loadBots(); }}>Done</button>
                           </div>
                         ) : pairStatus === 'disconnected' ? (
                           <div style={{ textAlign: 'center', padding: '1.5rem 0' }}>
@@ -782,7 +825,12 @@ export default function Manager() {
                     <div key={bot._id} style={{ background: 'rgba(8,8,25,0.9)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 16, padding: '1.25rem 1.5rem' }}>
                       {/* Header row */}
                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem', marginBottom: '1rem' }}>
-                        <div style={{ width: 48, height: 48, borderRadius: '50%', background: 'linear-gradient(135deg,var(--cyan),var(--purple))', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.4rem', flexShrink: 0 }}>🤖</div>
+                        <div style={{ width: 48, height: 48, borderRadius: '50%', overflow: 'hidden', background: 'linear-gradient(135deg,var(--cyan),var(--purple))', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.4rem', flexShrink: 0, border: '2px solid rgba(0,212,255,0.2)' }}>
+                          {bot.avatarData
+                            ? <img src={bot.avatarData} alt={bot.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                            : '🤖'
+                          }
+                        </div>
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ fontWeight: 700, fontSize: '0.95rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{bot.name}</div>
                           <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>+{bot.phone}</div>
@@ -835,7 +883,7 @@ export default function Manager() {
                       {/* Action buttons row 2: re-link / delete */}
                       <div style={{ display: 'flex', gap: '0.5rem' }}>
                         <button className="m-btn m-btn-ghost m-btn-sm" style={{ flex: 1, justifyContent: 'center' }}
-                          onClick={() => { setShowAddBot(true); setBotPhone(bot.phone); setBotName(bot.name); setActivePairing(null); setPairStatus(null); }}>
+                          onClick={() => { setShowAddBot(true); setBotPhone(bot.phone); setBotName(bot.name); setBotAvatar(bot.avatarData || ''); setBotAvatarPreview(bot.avatarData || ''); setActivePairing(null); setPairStatus(null); }}>
                           🔄 Re-link
                         </button>
                         <button className="m-btn m-btn-danger m-btn-sm"
