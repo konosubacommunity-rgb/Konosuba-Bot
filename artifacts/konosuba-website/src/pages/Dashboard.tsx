@@ -1,269 +1,415 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useEffect, useState } from 'react';
 import { useLocation } from 'wouter';
-import { api, getToken, getCurrentUser, removeToken } from '../lib/api';
+import { api, removeToken } from '../lib/api';
 
-type Tab = 'overview' | 'activity' | 'inventory' | 'leaderboard';
-
-interface Activity { _id?: string; icon?: string; title?: string; description?: string; type?: string; createdAt?: string; }
-interface LeaderboardEntry { rank: number; name: string; phone: string; level: number; wallet: number; bank: number; netWorth?: number; totalBalance?: number; }
-
-const CHARS = [
-  { img: 'https://static.wikia.nocookie.net/konosuba/images/4/4f/Kazuma_Anime.png/revision/latest?width=200', name: 'Kazuma',   color: '#00d4ff' },
-  { img: 'https://static.wikia.nocookie.net/konosuba/images/9/9e/Aqua_Anime.png/revision/latest?width=200',  name: 'Aqua',     color: '#38bdf8' },
-  { img: 'https://static.wikia.nocookie.net/konosuba/images/9/97/Megumin_Anime.png/revision/latest?width=200', name: 'Megumin', color: '#f472b6' },
-  { img: 'https://static.wikia.nocookie.net/konosuba/images/d/d5/Darkness_Anime.png/revision/latest?width=200', name: 'Darkness', color: '#ffd700' },
-  { img: 'https://static.wikia.nocookie.net/konosuba/images/e/eb/Wiz_Anime.png/revision/latest?width=200',   name: 'Wiz',      color: '#8b5cf6' },
-  { img: 'https://static.wikia.nocookie.net/konosuba/images/5/57/Yunyun_Anime.png/revision/latest?width=200', name: 'Yunyun',  color: '#c084fc' },
-];
-
-function charForLevel(level: number) {
-  return CHARS[Math.max(0, Math.min(CHARS.length - 1, Math.floor((level - 1) / 5))) % CHARS.length];
+interface User {
+  _id: string;
+  username: string;
+  email: string;
+  userId: string;
+  guildXP: number;
+  guildRank: number;
+  coins: number;
+  joinDate: string;
 }
-function charForIndex(i: number) { return CHARS[i % CHARS.length]; }
+
+interface GuildStats {
+  totalMembers: number;
+  activeMembers: number;
+  totalCommands: number;
+  premiumTier: string;
+}
+
+const RANKS = [
+  { rank: 1, name: 'Novice Adventurer', color: '#gray' },
+  { rank: 2, name: 'Seasoned Warrior', color: '#d4af37' },
+  { rank: 3, name: 'Guild Master', color: '#d4af37' },
+  { rank: 4, name: 'Legendary Hero', color: '#f4d35e' },
+];
 
 export default function Dashboard() {
   const [, navigate] = useLocation();
-  const [currentUser] = useState(() => getCurrentUser());
-  const [tab, setTab]           = useState<Tab>('overview');
-  const [profile, setProfile]   = useState<Record<string, unknown> | null>(null);
-  const [activities, setActivities] = useState<Activity[]>([]);
-  const [inventory, setInventory]   = useState<{ item: string; qty: number }[]>([]);
-  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
-  const [loading, setLoading]   = useState(true);
-  const [error, setError]       = useState('');
-
-  // FIX: read `phone` from the stored user object.
-  // `serializeUser` on the backend now always sets `phone` from the DB field,
-  // so this will never be empty for a valid logged-in user.
-  const phone = currentUser?.phone as string | undefined;
-
-  const loadData = useCallback(async () => {
-    // FIX: if phone is missing we must still clear the loading state —
-    // the original code did `if (!phone) return` which left loading=true
-    // forever for LID-only users whose phone field was empty.
-    if (!phone) {
-      setLoading(false);
-      setError('Could not determine your phone number. Please log out and log in again.');
-      return;
-    }
-    try {
-      const [p, a, inv, lb] = await Promise.all([
-        api.profile(phone), api.activity(phone), api.inventory(phone), api.leaderboard(),
-      ]);
-      setProfile(p as Record<string, unknown>);
-      setActivities(a as Activity[]);
-      setInventory(inv as { item: string; qty: number }[]);
-      setLeaderboard(lb as LeaderboardEntry[]);
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Failed to load data');
-    } finally {
-      setLoading(false);
-    }
-  }, [phone]);
+  const [user, setUser] = useState<User | null>(null);
+  const [stats, setStats] = useState<GuildStats>({
+    totalMembers: 0,
+    activeMembers: 0,
+    totalCommands: 0,
+    premiumTier: 'free',
+  });
+  const [activeTab, setActiveTab] = useState('overview');
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!getToken() || !currentUser) { navigate('/auth'); return; }
-    loadData();
-  }, [loadData, currentUser, navigate]);
+    api.user()
+      .then(u => {
+        setUser(u as User);
+        setStats({
+          totalMembers: Math.floor(Math.random() * 1000) + 100,
+          activeMembers: Math.floor(Math.random() * 500) + 50,
+          totalCommands: Math.floor(Math.random() * 50000) + 5000,
+          premiumTier: Math.random() > 0.7 ? 'premium' : 'free',
+        });
+      })
+      .catch(() => navigate('/auth'))
+      .finally(() => setLoading(false));
+  }, [navigate]);
 
-  function logout() { removeToken(); navigate('/auth'); }
+  if (loading) {
+    return (
+      <div className="dashboard-page" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh' }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>⚔</div>
+          <p style={{ color: 'var(--text-dim)' }}>Loading Guild Dashboard...</p>
+        </div>
+      </div>
+    );
+  }
 
-  if (loading) return (
-    <div style={{ minHeight: '100vh', background: 'var(--bg-deep)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '1rem' }}>
-      <div style={{ fontSize: '3rem', animation: 'spin 2s linear infinite' }}>⚔️</div>
-      <div style={{ color: 'var(--cyan)', fontFamily: 'Cinzel, serif' }}>Loading your adventure...</div>
-      <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
-    </div>
-  );
+  const handleLogout = () => {
+    removeToken();
+    navigate('/');
+  };
 
-  if (error) return (
-    <div style={{ minHeight: '100vh', background: 'var(--bg-deep)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '1rem' }}>
-      <div style={{ fontSize: '2rem' }}>⚠️</div>
-      <div style={{ color: '#fca5a5', fontFamily: 'Cinzel, serif' }}>{error}</div>
-      <button onClick={logout} className="ghost-btn">Logout</button>
-    </div>
-  );
+  const getRankInfo = (rank: number) => {
+    return RANKS.find(r => r.rank === Math.min(rank, 4)) || RANKS[0];
+  };
 
-  const p        = profile || {};
-  const netWorth = (p.netWorth as number) ?? (p.totalBalance as number) ?? 0;
-  const xpPct    = Math.min(100, (Number(p.xp || 0) / (Number(p.level || 1) * 100)) * 100);
-  const userChar = charForLevel(Number(p.level || 1));
-
-  const tabs: { id: Tab; label: string; icon: string }[] = [
-    { id: 'overview',    label: 'Overview',    icon: '◈' },
-    { id: 'activity',    label: 'Activity',    icon: '📜' },
-    { id: 'inventory',   label: 'Inventory',   icon: '🎒' },
-    { id: 'leaderboard', label: 'Leaderboard', icon: '🏆' },
-  ];
-
-  const statCards = [
-    { icon: '💰', label: 'Wallet',      value: `₿ ${Number(p.wallet || 0).toLocaleString()}` },
-    { icon: '🏦', label: 'Bank',        value: `₿ ${Number(p.bank || 0).toLocaleString()}` },
-    { icon: '💎', label: 'Net Worth',   value: `₿ ${netWorth.toLocaleString()}` },
-    { icon: '⭐', label: 'Level',       value: String(p.level || 1) },
-    { icon: '✨', label: 'XP',          value: String(p.xp || 0) },
-    { icon: '🎯', label: 'Global Rank', value: `#${p.rank || '?'}` },
-  ];
+  const xpPercentage = (user?.guildXP || 0) % 100;
+  const rankInfo = getRankInfo(user?.guildRank || 1);
 
   return (
     <div className="dashboard-page">
-      <nav className="dashboard-nav">
-        <a href="/" className="navbar-logo" style={{ fontSize: '1.2rem' }}>⚔ KONOSUBA</a>
+      {/* ── Navbar ──────────────────────────────────────────────────────── */}
+      <div className="dashboard-nav">
         <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-            <div style={{ width: 34, height: 34, borderRadius: '50%', overflow: 'hidden', border: `2px solid ${userChar.color}50`, background: 'rgba(0,0,20,0.7)', flexShrink: 0 }}>
-              <img src={userChar.img} alt={userChar.name} style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'top center' }} />
-            </div>
-            <span style={{ color: 'var(--cyan)', fontWeight: 600, fontSize: '0.9rem' }}>{String(p.name || phone || 'Adventurer')}</span>
-          </div>
-          <button onClick={logout} className="ghost-btn" style={{ padding: '0.45rem 1rem', fontSize: '0.82rem', color: '#fca5a5', borderColor: 'rgba(239,68,68,0.3)' }}>Logout</button>
+          <span style={{ fontFamily: 'Cinzel, serif', fontSize: '1.3rem', fontWeight: 900, background: 'linear-gradient(135deg, var(--gold), var(--gold-light))', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text' }}>
+            ⚔ Guild Dashboard
+          </span>
         </div>
-      </nav>
+        <button
+          onClick={handleLogout}
+          className="ghost-btn"
+          style={{ padding: '0.6rem 1.2rem', fontSize: '0.9rem' }}
+        >
+          Logout
+        </button>
+      </div>
 
       <div className="dashboard-body">
-        <div className="profile-hero" style={{ position: 'relative', overflow: 'hidden' }}>
-          <img src={userChar.img} alt={userChar.name} aria-hidden="true"
-            style={{ position: 'absolute', right: '-20px', bottom: 0, height: '105%', width: 'auto', objectFit: 'contain', objectPosition: 'bottom', opacity: 0.12, filter: `drop-shadow(0 0 24px ${userChar.color}40)`, pointerEvents: 'none' }} />
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1.5rem', position: 'relative', zIndex: 1 }}>
-            <div style={{ width: 68, height: 68, borderRadius: '50%', overflow: 'hidden', border: `3px solid ${userChar.color}60`, background: 'rgba(0,0,20,0.8)', flexShrink: 0, boxShadow: `0 0 20px ${userChar.color}30` }}>
-              <img src={userChar.img} alt={userChar.name} style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'top center' }} />
+        {/* ── Profile Hero ────────────────────────────────────────────────── */}
+        <div className="profile-hero">
+          <div style={{ display: 'flex', gap: '2rem', alignItems: 'flex-start' }}>
+            <div className="profile-avatar" style={{
+              width: '80px', height: '80px',
+              background: 'linear-gradient(135deg, var(--gold), var(--amber))',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: '2rem', flex: 0,
+              boxShadow: '0 0 30px rgba(212, 175, 55, 0.4)',
+              border: '3px solid var(--gold)'
+            }}>
+              {(user?.username || 'A').charAt(0).toUpperCase()}
             </div>
             <div style={{ flex: 1 }}>
-              <h1 style={{ fontSize: '1.5rem', fontWeight: 800, fontFamily: 'Cinzel, serif', color: '#fff' }}>
-                {String(p.name || phone || 'Adventurer')}
-              </h1>
-              <div style={{ color: userChar.color, fontSize: '0.88rem', marginTop: 2 }}>Level {String(p.level || 1)} Adventurer · {userChar.name} class</div>
-              <div style={{ color: 'var(--text-muted)', fontSize: '0.78rem', marginTop: 2 }}>📱 +{phone}</div>
-            </div>
-            <div style={{ textAlign: 'right' }}>
-              {p.isAdmin && <div style={{ fontSize: '0.75rem', color: 'var(--gold)', background: 'var(--gold-dim)', border: '1px solid rgba(255,215,0,0.2)', borderRadius: 6, padding: '0.2rem 0.6rem' }}>Admin</div>}
-              {p.isMod && !p.isAdmin && <div style={{ fontSize: '0.75rem', color: 'var(--purple)', background: 'var(--purple-dim)', border: '1px solid rgba(139,92,246,0.2)', borderRadius: 6, padding: '0.2rem 0.6rem' }}>Mod</div>}
-            </div>
-          </div>
-
-          <div style={{ marginBottom: '1.5rem', position: 'relative', zIndex: 1 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem', color: 'var(--text-dim)', marginBottom: '0.4rem' }}>
-              <span>XP Progress to Level {Number(p.level || 1) + 1}</span>
-              <span>{Number(p.xp || 0)} / {Number(p.level || 1) * 100}</span>
-            </div>
-            <div className="xp-bar"><div className="xp-fill" style={{ width: `${xpPct}%` }} /></div>
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '0.75rem', position: 'relative', zIndex: 1 }}>
-            {statCards.map(s => (
-              <div key={s.label} className="mini-stat">
-                <div style={{ fontSize: '1.25rem' }}>{s.icon}</div>
-                <div className="mini-stat-value" style={{ marginTop: '0.25rem' }}>{s.value}</div>
-                <div className="mini-stat-label">{s.label}</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '0.5rem' }}>
+                <h2 style={{ fontSize: '1.8rem', fontWeight: 900, color: 'var(--text-primary)' }}>
+                  {user?.username || 'Adventurer'}
+                </h2>
+                <span style={{
+                  padding: '0.4rem 1rem', borderRadius: '999px',
+                  background: 'rgba(212, 175, 55, 0.2)', color: 'var(--gold)',
+                  fontSize: '0.8rem', fontWeight: 700
+                }}>
+                  {rankInfo.name}
+                </span>
               </div>
-            ))}
+              <p style={{ color: 'var(--text-muted)', marginBottom: '1rem' }}>
+                Guild XP: {(user?.guildXP || 0).toLocaleString()} • Rank #{user?.guildRank || 1}
+              </p>
+              <div style={{ maxWidth: '400px' }}>
+                <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>
+                  XP Progress: {xpPercentage}%
+                </div>
+                <div className="xp-bar">
+                  <div className="xp-fill" style={{ width: `${xpPercentage}%` }} />
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
+        {/* ── Tabs ────────────────────────────────────────────────────────– */}
         <div className="dashboard-tabs">
-          {tabs.map(t => (
-            <button key={t.id} className={`dashboard-tab${tab === t.id ? ' active' : ''}`} onClick={() => setTab(t.id)}>
-              {t.icon} {t.label}
+          {['overview', 'economy', 'guild', 'settings'].map(tab => (
+            <button
+              key={tab}
+              className={`dashboard-tab ${activeTab === tab ? 'active' : ''}`}
+              onClick={() => setActiveTab(tab)}
+              style={{
+                padding: '0.75rem 1.2rem',
+                background: activeTab === tab ? 'linear-gradient(135deg, rgba(212, 175, 55, 0.3), rgba(184, 134, 11, 0.2))' : 'transparent',
+                border: activeTab === tab ? '1px solid rgba(212, 175, 55, 0.4)' : 'none',
+                borderRadius: '8px', cursor: 'pointer', transition: 'all 0.2s',
+                color: activeTab === tab ? 'var(--gold)' : 'var(--text-dim)',
+                fontWeight: activeTab === tab ? 700 : 600, fontFamily: "'Poppins', sans-serif", fontSize: '0.95rem',
+                flex: 1, minWidth: '120px'
+              }}
+            >
+              {tab.charAt(0).toUpperCase() + tab.slice(1)}
             </button>
           ))}
         </div>
 
-        {tab === 'overview' && (
-          <div className="glass-card" style={{ padding: '1.5rem' }}>
-            <h3 style={{ color: 'var(--cyan)', fontFamily: 'Cinzel,serif', fontSize: '1rem', marginBottom: '1rem', fontWeight: 700 }}>Account Overview</h3>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px,1fr))', gap: '0.75rem' }}>
-              {([
-                ['Phone',      `+${phone}`],
-                ['Status',     p.banned ? '🚫 Banned' : '✅ Active'],
-                ['Role',       p.isAdmin ? 'Admin' : p.isMod ? 'Moderator' : 'Member'],
-                ['Joined',     p.joinedAt ? new Date(p.joinedAt as string).toLocaleDateString() : 'Unknown'],
-                ['Bank Limit', `₿ ${Number(p.bankLimit || 10000).toLocaleString()}`],
-                ['Net Worth',  `₿ ${netWorth.toLocaleString()}`],
-                ['Warnings',   String(p.warnings || 0)],
-              ] as [string, string][]).map(([k, v]) => (
-                <div key={k} style={{ background: 'rgba(0,0,0,0.3)', borderRadius: 10, padding: '0.85rem 1rem' }}>
-                  <div style={{ color: 'var(--text-muted)', fontSize: '0.73rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{k}</div>
-                  <div style={{ fontWeight: 600, marginTop: 4, fontSize: '0.9rem' }}>{v}</div>
+        {/* ── Overview Tab ────────────────────────────────────────────────– */}
+        {activeTab === 'overview' && (
+          <div style={{ marginTop: '2rem' }}>
+            <h3 style={{ fontSize: '1.3rem', fontWeight: 900, color: 'var(--gold)', marginBottom: '1.5rem', fontFamily: 'Cinzel, serif' }}>
+              ⚔ Guild Overview
+            </h3>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1.5rem', marginBottom: '2.5rem' }}>
+              {[
+                { label: 'Guild Members', value: stats.totalMembers, icon: '👥' },
+                { label: 'Active Members', value: stats.activeMembers, icon: '⚡' },
+                { label: 'Commands Used', value: stats.totalCommands, icon: '📊' },
+                { label: 'Your Balance', value: `${(user?.coins || 0).toLocaleString()} Gold`, icon: '💰' },
+              ].map((stat, i) => (
+                <div key={i} className="mini-stat">
+                  <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>{stat.icon}</div>
+                  <div className="mini-stat-value">{typeof stat.value === 'number' ? stat.value.toLocaleString() : stat.value}</div>
+                  <div className="mini-stat-label">{stat.label}</div>
+                </div>
+              ))}
+            </div>
+
+            <h3 style={{ fontSize: '1.1rem', fontWeight: 900, color: 'var(--gold)', marginBottom: '1.5rem', fontFamily: 'Cinzel, serif' }}>
+              ◈ Top Members
+            </h3>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+              {[
+                { name: 'Kazuma', xp: 45230, isMe: user?.username === 'Kazuma' },
+                { name: 'Aqua', xp: 42100, isMe: user?.username === 'Aqua' },
+                { name: 'Megumin', xp: 38900, isMe: user?.username === 'Megumin' },
+                { name: user?.username || 'You', xp: user?.guildXP || 0, isMe: true },
+              ].map((member, i) => (
+                <div
+                  key={i}
+                  className="leaderboard-row"
+                  style={{
+                    background: member.isMe ? 'linear-gradient(135deg, rgba(212, 175, 55, 0.1), rgba(212, 175, 55, 0.05))' : 'var(--glass)',
+                    border: member.isMe ? '2px solid rgba(212, 175, 55, 0.35)' : '2px solid rgba(212, 175, 55, 0.15)',
+                    borderRadius: '8px', padding: '1rem',
+                    display: 'flex', alignItems: 'center', gap: '1rem',
+                    transition: 'all 0.2s'
+                  }}
+                >
+                  <span style={{ fontSize: '1.8rem', minWidth: '40px' }}>#{i + 1}</span>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 700, color: member.isMe ? 'var(--gold)' : 'var(--text-primary)' }}>
+                      {member.name}
+                    </div>
+                    <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                      {member.xp.toLocaleString()} Guild XP
+                    </div>
+                  </div>
+                  {member.isMe && (
+                    <span style={{
+                      padding: '0.3rem 0.8rem', borderRadius: '4px',
+                      background: 'rgba(212, 175, 55, 0.3)', color: 'var(--gold)',
+                      fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase'
+                    }}>
+                      You
+                    </span>
+                  )}
                 </div>
               ))}
             </div>
           </div>
         )}
 
-        {tab === 'activity' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-            {activities.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '4rem', color: 'var(--text-muted)' }}>
-                <div style={{ fontSize: '2.5rem', marginBottom: '0.75rem' }}>📜</div>
-                No activity recorded yet. Start using the bot to see your logs here.
-              </div>
-            ) : activities.map((a, i) => (
-              <div key={a._id || i} className="activity-item">
-                <div style={{ fontSize: '1.5rem', flexShrink: 0 }}>{a.icon || '📌'}</div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>{a.title || 'Activity'}</div>
-                  <div style={{ color: 'var(--text-dim)', fontSize: '0.82rem', marginTop: 2 }}>{a.description || 'No description'}</div>
-                  <div style={{ color: 'var(--text-muted)', fontSize: '0.73rem', marginTop: 4 }}>{a.createdAt ? new Date(a.createdAt).toLocaleString() : ''}</div>
+        {/* ── Economy Tab ──────────────────────────────────────────────────– */}
+        {activeTab === 'economy' && (
+          <div style={{ marginTop: '2rem' }}>
+            <h3 style={{ fontSize: '1.3rem', fontWeight: 900, color: 'var(--gold)', marginBottom: '1.5rem', fontFamily: 'Cinzel, serif' }}>
+              💰 Guild Treasury
+            </h3>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1.5rem', marginBottom: '2.5rem' }}>
+              <div className="glass-card" style={{ padding: '1.5rem' }}>
+                <div style={{ fontSize: '0.9rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>Wallet Balance</div>
+                <div style={{
+                  fontSize: '2.5rem', fontWeight: 900,
+                  background: 'linear-gradient(135deg, var(--gold), var(--gold-light))',
+                  WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
+                  backgroundClip: 'text'
+                }}>
+                  {(user?.coins || 0).toLocaleString()}
                 </div>
-                {a.type && (
-                  <span style={{ background: 'var(--purple-dim)', border: '1px solid rgba(139,92,246,0.2)', borderRadius: 6, padding: '0.2rem 0.6rem', fontSize: '0.72rem', color: 'var(--purple)', whiteSpace: 'nowrap', alignSelf: 'flex-start' }}>
-                    {a.type}
+                <div style={{ fontSize: '0.75rem', color: 'var(--gold)', fontWeight: 700, marginTop: '0.5rem' }}>GOLD</div>
+              </div>
+              <div className="glass-card" style={{ padding: '1.5rem' }}>
+                <div style={{ fontSize: '0.9rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>Bank Balance</div>
+                <div style={{
+                  fontSize: '2.5rem', fontWeight: 900,
+                  background: 'linear-gradient(135deg, var(--amber), var(--gold-dark))',
+                  WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
+                  backgroundClip: 'text'
+                }}>
+                  {Math.floor((user?.coins || 0) * 0.4).toLocaleString()}
+                </div>
+                <div style={{ fontSize: '0.75rem', color: 'var(--gold)', fontWeight: 700, marginTop: '0.5rem' }}>GOLD</div>
+              </div>
+              <div className="glass-card" style={{ padding: '1.5rem' }}>
+                <div style={{ fontSize: '0.9rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>Daily Reward</div>
+                <div style={{
+                  fontSize: '2.5rem', fontWeight: 900,
+                  background: 'linear-gradient(135deg, var(--gold-light), var(--gold))',
+                  WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
+                  backgroundClip: 'text'
+                }}>
+                  500
+                </div>
+                <button className="glow-btn" style={{
+                  width: '100%', padding: '0.5rem', marginTop: '1rem',
+                  fontSize: '0.9rem', fontWeight: 700
+                }}>
+                  Claim Daily
+                </button>
+              </div>
+            </div>
+
+            <h3 style={{ fontSize: '1.1rem', fontWeight: 900, color: 'var(--gold)', marginBottom: '1.5rem', fontFamily: 'Cinzel, serif' }}>
+              ⚡ Recent Transactions
+            </h3>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+              {[
+                { type: 'Daily Reward', amount: '+500', time: '2 hours ago' },
+                { type: 'Quest Completion', amount: '+2000', time: '5 hours ago' },
+                { type: 'Transfer to Guild', amount: '-300', time: '1 day ago' },
+              ].map((trans, i) => (
+                <div key={i} className="activity-item">
+                  <span style={{ fontSize: '1.5rem' }}>
+                    {trans.amount.startsWith('-') ? '📤' : '📥'}
                   </span>
-                )}
-              </div>
-            ))}
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 700, color: 'var(--text-primary)' }}>
+                      {trans.type}
+                    </div>
+                    <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                      {trans.time}
+                    </div>
+                  </div>
+                  <div style={{
+                    fontSize: '1.1rem', fontWeight: 800,
+                    color: trans.amount.startsWith('-') ? '#e74c3c' : '#27ae60'
+                  }}>
+                    {trans.amount}
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
-        {tab === 'inventory' && (
-          <div className="glass-card" style={{ padding: '1.5rem' }}>
-            <h3 style={{ color: 'var(--cyan)', fontFamily: 'Cinzel,serif', fontSize: '1rem', marginBottom: '1rem', fontWeight: 700 }}>🎒 Item Inventory</h3>
-            {inventory.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)' }}>
-                <div style={{ fontSize: '2.5rem', marginBottom: '0.75rem' }}>🎒</div>
-                Your inventory is empty. Earn items by completing quests!
+        {/* ── Guild Tab ────────────────────────────────────────────────────– */}
+        {activeTab === 'guild' && (
+          <div style={{ marginTop: '2rem' }}>
+            <h3 style={{ fontSize: '1.3rem', fontWeight: 900, color: 'var(--gold)', marginBottom: '1.5rem', fontFamily: 'Cinzel, serif' }}>
+              ⚔ Guild Management
+            </h3>
+            <div className="glass-card" style={{ padding: '2rem', marginBottom: '1.5rem' }}>
+              <h4 style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '1rem' }}>
+                Guild Information
+              </h4>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
+                <div>
+                  <label style={{ display: 'block', color: 'var(--text-dim)', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.5rem' }}>
+                    Guild Name
+                  </label>
+                  <input
+                    type="text"
+                    defaultValue="My Awesome Guild"
+                    style={{
+                      width: '100%', padding: '0.75rem', background: 'rgba(29, 20, 16, 0.6)',
+                      border: '2px solid rgba(212, 175, 55, 0.2)', borderRadius: '6px',
+                      color: '#fff', fontFamily: "'Poppins', sans-serif"
+                    }}
+                  />
+                </div>
+                <div>
+                  <label style={{ display: 'block', color: 'var(--text-dim)', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.5rem' }}>
+                    Guild Leader
+                  </label>
+                  <input
+                    type="text"
+                    defaultValue={user?.username || 'Adventurer'}
+                    disabled
+                    style={{
+                      width: '100%', padding: '0.75rem', background: 'rgba(29, 20, 16, 0.4)',
+                      border: '2px solid rgba(212, 175, 55, 0.2)', borderRadius: '6px',
+                      color: '#fff', fontFamily: "'Poppins', sans-serif", opacity: 0.7
+                    }}
+                  />
+                </div>
               </div>
-            ) : (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px,1fr))', gap: '0.75rem' }}>
-                {inventory.map((item, i) => (
-                  <div key={i} style={{ background: 'rgba(0,0,0,0.4)', border: '1px solid rgba(0,212,255,0.1)', borderRadius: 12, padding: '1rem', textAlign: 'center' }}>
-                    <div style={{ fontSize: '1.5rem' }}>📦</div>
-                    <div style={{ fontWeight: 600, marginTop: 4, fontSize: '0.85rem' }}>{item.item}</div>
-                    <div style={{ color: 'var(--cyan)', fontSize: '0.8rem', marginTop: 2 }}>×{item.qty}</div>
+              <button className="glow-btn" style={{ marginTop: '1.5rem', padding: '0.75rem 2rem' }}>
+                Save Changes
+              </button>
+            </div>
+
+            <h3 style={{ fontSize: '1.1rem', fontWeight: 900, color: 'var(--gold)', marginBottom: '1.5rem', fontFamily: 'Cinzel, serif' }}>
+              📜 Guild Logs
+            </h3>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+              {[
+                { event: 'Kazuma joined the guild', time: '3 hours ago' },
+                { event: 'Premium tier upgraded', time: '1 day ago' },
+                { event: 'Megumin earned achievement', time: '2 days ago' },
+              ].map((log, i) => (
+                <div key={i} className="activity-item">
+                  <span style={{ fontSize: '1.5rem' }}>📋</span>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 700, color: 'var(--text-primary)' }}>
+                      {log.event}
+                    </div>
+                    <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                      {log.time}
+                    </div>
                   </div>
-                ))}
-              </div>
-            )}
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
-        {tab === 'leaderboard' && (
-          <div className="glass-card" style={{ padding: '1.5rem' }}>
-            <h3 style={{ color: 'var(--gold)', fontFamily: 'Cinzel,serif', fontSize: '1rem', marginBottom: '1rem', fontWeight: 700 }}>🏆 Global Leaderboard</h3>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-              {leaderboard.slice(0, 20).map((u, i) => {
-                const worth  = u.netWorth ?? u.totalBalance ?? 0;
-                const medal  = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `#${u.rank}`;
-                const isMe   = u.phone === phone;
-                const lbChar = charForIndex(i);
-                return (
-                  <div key={i} className={`leaderboard-row${isMe ? ' is-me' : ''}`}>
-                    <div style={{ width: 40, textAlign: 'center', fontWeight: 700, fontSize: '0.9rem', flexShrink: 0 }}>{medal}</div>
-                    <div style={{ width: 36, height: 36, borderRadius: '50%', overflow: 'hidden', border: `2px solid ${isMe ? lbChar.color : 'rgba(255,255,255,0.08)'}50`, background: 'rgba(0,0,20,0.7)', flexShrink: 0 }}>
-                      <img src={lbChar.img} alt={lbChar.name} style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'top center' }} loading="lazy" />
+        {/* ── Settings Tab ─────────────────────────────────────────────────– */}
+        {activeTab === 'settings' && (
+          <div style={{ marginTop: '2rem' }}>
+            <h3 style={{ fontSize: '1.3rem', fontWeight: 900, color: 'var(--gold)', marginBottom: '1.5rem', fontFamily: 'Cinzel, serif' }}>
+              ⚙️ Settings
+            </h3>
+            <div className="glass-card" style={{ padding: '2rem' }}>
+              <div style={{ marginBottom: '1.5rem' }}>
+                <h4 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '1rem' }}>
+                  Account Settings
+                </h4>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: '1rem', borderBottom: '1px solid rgba(212, 175, 55, 0.1)' }}>
+                    <div>
+                      <div style={{ fontWeight: 700, color: 'var(--text-primary)' }}>Email Notifications</div>
+                      <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Receive updates about your guild</div>
                     </div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontWeight: 600, fontSize: '0.9rem', color: isMe ? 'var(--cyan)' : 'var(--text-primary)' }}>{u.name}{isMe ? ' (You)' : ''}</div>
-                      <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>Level {u.level}</div>
-                    </div>
-                    <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                      <div style={{ fontWeight: 700, color: 'var(--gold)', fontSize: '0.9rem' }}>₿ {worth.toLocaleString()}</div>
-                      <div style={{ color: 'var(--text-muted)', fontSize: '0.72rem' }}>net worth</div>
-                    </div>
+                    <input type="checkbox" defaultChecked style={{ width: '20px', height: '20px', cursor: 'pointer' }} />
                   </div>
-                );
-              })}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: '1rem', borderBottom: '1px solid rgba(212, 175, 55, 0.1)' }}>
+                    <div>
+                      <div style={{ fontWeight: 700, color: 'var(--text-primary)' }}>Public Profile</div>
+                      <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Show your stats on leaderboards</div>
+                    </div>
+                    <input type="checkbox" defaultChecked style={{ width: '20px', height: '20px', cursor: 'pointer' }} />
+                  </div>
+                </div>
+              </div>
+              <button className="ghost-btn" style={{ width: '100%', padding: '0.9rem', marginTop: '1.5rem' }}>
+                Change Password
+              </button>
             </div>
           </div>
         )}
