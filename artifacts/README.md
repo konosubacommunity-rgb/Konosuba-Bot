@@ -12,11 +12,73 @@ A premium anime-inspired WhatsApp bot management platform with dark fantasy aest
 
 ---
 
-## Deploy on Render — Single Web Service (Recommended)
+## Option A — Deploy on Render as 3 Separate Services (Current Setup)
 
-Deploy everything as **one** Render Web Service. The API server builds both frontends and serves them as static files.
+This is the easiest option on Render's free tier.
 
-### In the Render Dashboard → New Web Service:
+### Service 1 — API Server (Web Service)
+
+| Field | Value |
+|-------|-------|
+| **Root Directory** | `api-server` |
+| **Build Command** | `npm install` |
+| **Start Command** | `node server.js` |
+
+**Environment variables to set:**
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `MONGO_URI` | ✅ | MongoDB Atlas connection string |
+| `JWT_SECRET` | ✅ | Long random secret for JWT tokens |
+| `ADMIN_PASSWORD` | ✅ | Password for the bot manager panel |
+| `OWNER_NUMBERS` | ✅ | Comma-separated phone numbers with country code |
+| `BOT_WEBHOOK_SECRET` | optional | Shared secret for bot webhook calls |
+| `WEBSITE_URL` | optional | Your API server's Render URL |
+| `PREFIX` | optional | Bot command prefix (default: `.`) |
+
+---
+
+### Service 2 — Website (Static Site)
+
+| Field | Value |
+|-------|-------|
+| **Root Directory** | `konosuba-website` |
+| **Build Command** | `npm install && npm run build` |
+| **Publish Directory** | `dist` |
+
+**Environment variable to set:**
+
+| Variable | Value |
+|----------|-------|
+| `VITE_API_URL` | Your API server URL, e.g. `https://konosuba-api.onrender.com` |
+
+> ⚠️ Without `VITE_API_URL`, all API calls (login, register, stats, etc.) will 404 because they will go to the static site's own domain, which has no API.
+
+---
+
+### Service 3 — Bot Manager (Static Site)
+
+| Field | Value |
+|-------|-------|
+| **Root Directory** | `bot-manager` |
+| **Build Command** | `npm install && npm run build` |
+| **Publish Directory** | `dist` |
+
+**Environment variables to set:**
+
+| Variable | Value |
+|----------|-------|
+| `VITE_API_URL` | Your API server URL, e.g. `https://konosuba-api.onrender.com` |
+
+> ⚠️ Without `VITE_API_URL`, all bot manager API calls will 404.
+>
+> Do **NOT** set `VITE_BASE_PATH` for this service — the default `/` is correct for a separate static site.
+
+---
+
+## Option B — Deploy as a Single Web Service (All-in-One)
+
+The API server builds both frontends and serves them as static files.
 
 | Field | Value |
 |-------|-------|
@@ -24,59 +86,43 @@ Deploy everything as **one** Render Web Service. The API server builds both fron
 | **Build Command** | `cd konosuba-website && npm install && npm run build && cd ../bot-manager && npm install && npm run build && cd ../api-server && npm install` |
 | **Start Command** | `node api-server/server.js` |
 
-### Environment Variables (set in Render dashboard):
+**Additional env var for the bot manager build** (add to Render environment):
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `MONGO_URI` | ✅ | MongoDB Atlas connection string |
-| `JWT_SECRET` | ✅ | Long random string for JWT signing |
-| `ADMIN_PASSWORD` | ✅ | Password for the bot manager panel |
-| `OWNER_NUMBERS` | ✅ | Comma-separated owner phone numbers (with country code) |
-| `BOT_WEBHOOK_SECRET` | optional | Shared secret for bot webhook calls |
-| `WEBSITE_URL` | optional | Your Render URL (used in bot messages) |
-| `PREFIX` | optional | Bot command prefix (default: `.`) |
+| Variable | Value |
+|----------|-------|
+| `VITE_BASE_PATH` | `/manager/` |
 
----
+Then your build command becomes:
+```
+cd konosuba-website && npm install && npm run build && cd ../bot-manager && VITE_BASE_PATH=/manager/ npm install && npm run build && cd ../api-server && npm install
+```
 
-## Deploy on Render — Separate Services (3 services)
+**All other environment variables** (same as Option A Service 1):
+`MONGO_URI`, `JWT_SECRET`, `ADMIN_PASSWORD`, `OWNER_NUMBERS`, `BOT_WEBHOOK_SECRET`, `WEBSITE_URL`, `PREFIX`
 
-If you prefer separate services, set `VITE_API_URL` on each frontend pointing to the API server URL.
-
-### Service 1 — API Server (Web Service)
-- Root: `api-server`
-- Build: `npm install`
-- Start: `node server.js`
-- Set all environment variables listed above
-
-### Service 2 — Website (Static Site)
-- Root: `konosuba-website`
-- Build: `npm install && npm run build`
-- Publish dir: `dist`
-- **Environment var**: `VITE_API_URL=https://your-api-server.onrender.com`
-
-### Service 3 — Bot Manager (Static Site)
-- Root: `bot-manager`
-- Build: `npm install && npm run build`
-- Publish dir: `dist`
-- **Environment var**: `VITE_API_URL=https://your-api-server.onrender.com`
-
-> The `_redirects` file in each frontend's `public/` folder handles SPA routing on Render static sites automatically.
+> In single-service mode, `VITE_API_URL` is NOT needed — all requests go to the same origin automatically.
 
 ---
 
-## URLs (Single Service)
+## URLs
 
-- `/` — Landing page
-- `/auth` — Login / Register
-- `/dashboard` — User dashboard (requires login)
-- `/manager/` — Admin bot manager (requires admin key)
-- `/api/*` — REST API
+**Option A (Separate Services):**
+- Website: `https://your-website.onrender.com/`
+- Bot Manager: `https://your-bot-manager.onrender.com/`
+- API: `https://your-api.onrender.com/api/`
+
+**Option B (Single Service):**
+- Website: `https://your-app.onrender.com/`
+- Bot Manager: `https://your-app.onrender.com/manager/`
+- API: `https://your-app.onrender.com/api/`
+
+---
 
 ## Authentication
 
-- **Website**: Users register/login with their WhatsApp phone number and a password.
-- **Bot Manager**: Enter your `ADMIN_PASSWORD` to unlock the dashboard.
+- **Website**: Register/login with your WhatsApp phone number and a password.
+- **Bot Manager**: Enter your `ADMIN_PASSWORD` to unlock the control panel.
 
 ## Bot Integration
 
-Point your Baileys bot to POST user data to `/api/website/*` with `x-admin-key` header set to your `ADMIN_PASSWORD` or `BOT_WEBHOOK_SECRET`.
+Point your Baileys bot to POST to `/api/website/*` with the `x-admin-key` header set to your `ADMIN_PASSWORD` or `BOT_WEBHOOK_SECRET`.

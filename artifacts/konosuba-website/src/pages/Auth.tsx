@@ -2,11 +2,51 @@ import { useState, useEffect } from 'react';
 import { useLocation, useSearch, Link } from 'wouter';
 import { api, setToken, setCurrentUser, getToken } from '../lib/api';
 
-// Real KonoSuba character images — Fandom Wiki CDN
+// KonoSuba character images with multiple CDN fallbacks
 const CHAR_IMGS = {
-  megumin: 'https://static.wikia.nocookie.net/konosuba/images/9/97/Megumin_Anime.png/revision/latest?width=500',
-  aqua:    'https://static.wikia.nocookie.net/konosuba/images/9/9e/Aqua_Anime.png/revision/latest?width=500',
+  megumin: 'https://static.wikia.nocookie.net/kono-suba/images/e/e6/Megumin_Anime.png/revision/latest/scale-to-width-down/500',
+  aqua:    'https://static.wikia.nocookie.net/kono-suba/images/d/d1/Aqua_Anime.png/revision/latest/scale-to-width-down/500',
 };
+
+function CharImg({ src, alt, style }: { src: string; alt: string; style?: React.CSSProperties }) {
+  const [failed, setFailed] = useState(false);
+  const emoji = alt === 'Megumin' ? '🧙‍♀️' : '💫';
+  if (failed) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', height: '100%', fontSize: '5rem', opacity: 0.5 }}>
+        {emoji}
+      </div>
+    );
+  }
+  return (
+    <img
+      src={src}
+      alt={alt}
+      style={style}
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
+function SmallCharImg({ src, alt }: { src: string; alt: string }) {
+  const [failed, setFailed] = useState(false);
+  const emoji = alt === 'Megumin' ? '🧙‍♀️' : '💫';
+  if (failed) {
+    return (
+      <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.6rem' }}>
+        {emoji}
+      </div>
+    );
+  }
+  return (
+    <img
+      src={src}
+      alt={alt}
+      style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'top center' }}
+      onError={() => setFailed(true)}
+    />
+  );
+}
 
 export default function Auth() {
   const search = useSearch();
@@ -19,8 +59,7 @@ export default function Auth() {
   const [error, setError]       = useState('');
   const [loading, setLoading]   = useState(false);
 
-  // show Megumin on login, Aqua on register
-  const charImg = mode === 'login' ? CHAR_IMGS.megumin : CHAR_IMGS.aqua;
+  const charImg  = mode === 'login' ? CHAR_IMGS.megumin : CHAR_IMGS.aqua;
   const charName = mode === 'login' ? 'Megumin' : 'Aqua';
 
   useEffect(() => {
@@ -31,7 +70,9 @@ export default function Auth() {
   }, [search, navigate]);
 
   async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault(); setError(''); setLoading(true);
+    e.preventDefault();
+    setError('');
+    setLoading(true);
     try {
       const cleanPhone = phone.replace(/\D/g, '');
       if (!cleanPhone || cleanPhone.length < 7) {
@@ -55,7 +96,9 @@ export default function Auth() {
       navigate('/dashboard');
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'An error occurred');
-    } finally { setLoading(false); }
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
@@ -67,7 +110,7 @@ export default function Auth() {
         <div key={i} className="rune" style={{ left: `${8 + i * 20}%`, top: `${15 + (i % 2) * 60}%`, animationDelay: `${i * 1.5}s`, fontSize: '2.5rem' }}>{r}</div>
       ))}
 
-      {/* ── Character panel (hidden on small screens via CSS) ─────────── */}
+      {/* ── Character panel (large screens only) ────────────────────────── */}
       <div className="auth-character-panel" style={{
         display: 'none',
         flex: '0 0 42%',
@@ -77,7 +120,6 @@ export default function Auth() {
           ? 'linear-gradient(135deg, rgba(244,114,182,0.06), rgba(10,10,30,0.95))'
           : 'linear-gradient(135deg, rgba(56,189,248,0.06), rgba(10,10,30,0.95))',
       }}>
-        {/* Glow radial behind character */}
         <div style={{
           position: 'absolute', inset: 0,
           background: mode === 'login'
@@ -85,21 +127,21 @@ export default function Auth() {
             : 'radial-gradient(ellipse 70% 60% at 50% 80%, rgba(56,189,248,0.18), transparent)',
         }} />
 
-        {/* Character image */}
-        <img
-          src={charImg}
-          alt={charName}
-          style={{
-            position: 'absolute', bottom: 0, left: '50%',
-            transform: 'translateX(-50%)',
-            height: '88%', width: 'auto',
-            objectFit: 'contain', objectPosition: 'bottom',
-            filter: mode === 'login'
-              ? 'drop-shadow(0 0 30px rgba(244,114,182,0.5))'
-              : 'drop-shadow(0 0 30px rgba(56,189,248,0.5))',
-            animation: 'auth-float 6s ease-in-out infinite',
-          }}
-        />
+        {/* Character image with fallback */}
+        <div style={{ position: 'absolute', bottom: 0, left: '50%', transform: 'translateX(-50%)', height: '88%', width: '80%', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+          <CharImg
+            src={charImg}
+            alt={charName}
+            style={{
+              height: '100%', width: 'auto',
+              objectFit: 'contain', objectPosition: 'bottom',
+              filter: mode === 'login'
+                ? 'drop-shadow(0 0 30px rgba(244,114,182,0.5))'
+                : 'drop-shadow(0 0 30px rgba(56,189,248,0.5))',
+              animation: 'auth-float 6s ease-in-out infinite',
+            }}
+          />
+        </div>
 
         {/* Character name tag */}
         <div style={{
@@ -134,8 +176,8 @@ export default function Auth() {
           .auth-card { margin: auto; }
         }
         @keyframes auth-float {
-          0%, 100% { transform: translateX(-50%) translateY(0); }
-          50%       { transform: translateX(-50%) translateY(-14px); }
+          0%, 100% { transform: translateY(0); }
+          50%       { transform: translateY(-14px); }
         }
       `}</style>
 
@@ -147,10 +189,10 @@ export default function Auth() {
             {mode === 'login' ? 'Welcome back, Adventurer' : 'Begin your adventure'}
           </p>
 
-          {/* Small character icon above tabs */}
+          {/* Small character avatar above tabs */}
           <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '1rem' }}>
             <div style={{ width: 54, height: 54, borderRadius: '50%', overflow: 'hidden', border: `2px solid ${mode === 'login' ? 'rgba(244,114,182,0.4)' : 'rgba(56,189,248,0.4)'}`, background: 'rgba(0,0,20,0.6)' }}>
-              <img src={charImg} alt={charName} style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'top center' }} />
+              <SmallCharImg src={charImg} alt={charName} />
             </div>
           </div>
 
