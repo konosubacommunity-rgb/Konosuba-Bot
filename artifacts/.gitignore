@@ -1,9 +1,6 @@
 node_modules/
-website/node_modules/
-website/dist/
-bot-manager/node_modules/
+konosuba-website/dist/
 bot-manager/dist/
-server/node_modules/
 .env
 *.log
 .DS_Store

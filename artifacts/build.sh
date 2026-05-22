@@ -1,16 +1,15 @@
 #!/bin/bash
 set -e
-echo "🔨 Building Konosuba Bot Platform..."
-echo ""
-echo "📦 Building website..."
+echo "Building Konosuba Bot Platform..."
+
+echo "Building konosuba-website..."
 cd konosuba-website && npm install && npm run build && cd ..
-echo ""
-echo "📦 Building bot-manager..."
+
+echo "Building bot-manager..."
 cd bot-manager && npm install && npm run build && cd ..
-echo ""
-echo "📦 Installing server dependencies..."
+
+echo "Installing API server dependencies..."
 cd api-server && npm install && cd ..
-echo ""
-echo "✅ Build complete!"
-echo ""
+
+echo "Build complete!"
 echo "Start with: node api-server/server.js"
