@@ -1,187 +1,240 @@
 import { useState, useEffect } from 'react';
-import { useLocation } from 'wouter';
-import { api, setToken } from '../lib/api';
+import { useLocation, useSearch, Link } from 'wouter';
+import { api, setToken, setCurrentUser, getToken } from '../lib/api';
+
+// KonoSuba character images with multiple CDN fallbacks
+const CHAR_IMGS = {
+  megumin: 'https://static.wikia.nocookie.net/kono-suba/images/e/e6/Megumin_Anime.png/revision/latest/scale-to-width-down/500',
+  aqua:    'https://static.wikia.nocookie.net/kono-suba/images/d/d1/Aqua_Anime.png/revision/latest/scale-to-width-down/500',
+};
+
+function CharImg({ src, alt, style }: { src: string; alt: string; style?: React.CSSProperties }) {
+  const [failed, setFailed] = useState(false);
+  const emoji = alt === 'Megumin' ? '🧙‍♀️' : '💫';
+  if (failed) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', height: '100%', fontSize: '5rem', opacity: 0.5 }}>
+        {emoji}
+      </div>
+    );
+  }
+  return (
+    <img
+      src={src}
+      alt={alt}
+      style={style}
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
+function SmallCharImg({ src, alt }: { src: string; alt: string }) {
+  const [failed, setFailed] = useState(false);
+  const emoji = alt === 'Megumin' ? '🧙‍♀️' : '💫';
+  if (failed) {
+    return (
+      <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.6rem' }}>
+        {emoji}
+      </div>
+    );
+  }
+  return (
+    <img
+      src={src}
+      alt={alt}
+      style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'top center' }}
+      onError={() => setFailed(true)}
+    />
+  );
+}
 
 export default function Auth() {
+  const search = useSearch();
   const [, navigate] = useLocation();
-  const [mode, setMode] = useState<'login' | 'register'>('login');
-  const [email, setEmail] = useState('');
+  const params = new URLSearchParams(search);
+  const [mode, setMode] = useState<'login' | 'register'>(params.get('mode') === 'register' ? 'register' : 'login');
+  const [phone, setPhone]       = useState('');
   const [password, setPassword] = useState('');
-  const [username, setUsername] = useState('');
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [name, setName]         = useState('');
+  const [error, setError]       = useState('');
+  const [loading, setLoading]   = useState(false);
+
+  const charImg  = mode === 'login' ? CHAR_IMGS.megumin : CHAR_IMGS.aqua;
+  const charName = mode === 'login' ? 'Megumin' : 'Aqua';
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('mode') === 'register') setMode('register');
-  }, []);
+    if (getToken()) navigate('/dashboard');
+    const p = new URLSearchParams(search);
+    setMode(p.get('mode') === 'register' ? 'register' : 'login');
+    setError('');
+  }, [search, navigate]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError('');
     setLoading(true);
-
     try {
-      if (mode === 'login') {
-        const res = await api.login({ email, password });
-        setToken(res.token);
-        navigate('/dashboard');
-      } else {
-        const res = await api.register({ email, password, username });
-        setToken(res.token);
-        navigate('/dashboard');
+      const cleanPhone = phone.replace(/\D/g, '');
+      if (!cleanPhone || cleanPhone.length < 7) {
+        setError('Enter a valid phone number with country code');
+        setLoading(false);
+        return;
       }
-    } catch (err: any) {
-      setError(err.message || 'Authentication failed. Please try again.');
+      if (!password) {
+        setError('Password is required');
+        setLoading(false);
+        return;
+      }
+      let res;
+      if (mode === 'login') {
+        res = await api.login(cleanPhone, password);
+      } else {
+        res = await api.register(cleanPhone, password, name || undefined);
+      }
+      setToken(res.token);
+      setCurrentUser(res.user as Record<string, unknown>);
+      navigate('/dashboard');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'An error occurred');
     } finally {
       setLoading(false);
     }
-  };
+  }
 
   return (
-    <div className="auth-page">
+    <div className="auth-page" style={{ display: 'flex', alignItems: 'stretch', minHeight: '100vh' }}>
       <div className="auth-bg" />
-      <div className="auth-card glass-card" style={{ padding: '3rem' }}>
-        <div className="auth-logo">
-          ⚔ Guild Master
-        </div>
-        <p className="auth-subtitle">
-          {mode === 'login'
-            ? 'Welcome back to your guild'
-            : 'Create your adventurer account'}
-        </p>
 
-        <div className="auth-tabs">
-          <button
-            className={`auth-tab ${mode === 'login' ? 'active' : ''}`}
-            onClick={() => { setMode('login'); setError(''); }}
+      {/* Floating runes */}
+      {['⚔', '✦', '◈', '⬡', '✧'].map((r, i) => (
+        <div key={i} className="rune" style={{ left: `${8 + i * 20}%`, top: `${15 + (i % 2) * 60}%`, animationDelay: `${i * 1.5}s`, fontSize: '2.5rem' }}>{r}</div>
+      ))}
+
+      {/* ── Character panel (large screens only) ────────────────────────── */}
+      <div className="auth-character-panel" style={{
+        display: 'none',
+        flex: '0 0 42%',
+        position: 'relative',
+        overflow: 'hidden',
+        background: mode === 'login'
+          ? 'linear-gradient(135deg, rgba(244,114,182,0.06), rgba(10,10,30,0.95))'
+          : 'linear-gradient(135deg, rgba(56,189,248,0.06), rgba(10,10,30,0.95))',
+      }}>
+        <div style={{
+          position: 'absolute', inset: 0,
+          background: mode === 'login'
+            ? 'radial-gradient(ellipse 70% 60% at 50% 80%, rgba(244,114,182,0.18), transparent)'
+            : 'radial-gradient(ellipse 70% 60% at 50% 80%, rgba(56,189,248,0.18), transparent)',
+        }} />
+
+        {/* Character image with fallback */}
+        <div style={{ position: 'absolute', bottom: 0, left: '50%', transform: 'translateX(-50%)', height: '88%', width: '80%', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+          <CharImg
+            src={charImg}
+            alt={charName}
             style={{
-              flex: 1, padding: '0.75rem', borderRadius: '6px',
-              border: mode === 'login' ? 'none' : '2px solid var(--glass-border)',
-              background: mode === 'login' ? 'linear-gradient(135deg, var(--gold), var(--gold-light))' : 'transparent',
-              color: mode === 'login' ? '#1a1410' : 'var(--text-dim)',
-              fontWeight: mode === 'login' ? 700 : 600, cursor: 'pointer',
-              transition: 'all 0.2s', fontFamily: "'Poppins', sans-serif", fontSize: '0.9rem'
+              height: '100%', width: 'auto',
+              objectFit: 'contain', objectPosition: 'bottom',
+              filter: mode === 'login'
+                ? 'drop-shadow(0 0 30px rgba(244,114,182,0.5))'
+                : 'drop-shadow(0 0 30px rgba(56,189,248,0.5))',
+              animation: 'auth-float 6s ease-in-out infinite',
             }}
-          >
-            Login
-          </button>
-          <button
-            className={`auth-tab ${mode === 'register' ? 'active' : ''}`}
-            onClick={() => { setMode('register'); setError(''); }}
-            style={{
-              flex: 1, padding: '0.75rem', borderRadius: '6px',
-              border: mode === 'register' ? 'none' : '2px solid var(--glass-border)',
-              background: mode === 'register' ? 'linear-gradient(135deg, var(--gold), var(--gold-light))' : 'transparent',
-              color: mode === 'register' ? '#1a1410' : 'var(--text-dim)',
-              fontWeight: mode === 'register' ? 700 : 600, cursor: 'pointer',
-              transition: 'all 0.2s', fontFamily: "'Poppins', sans-serif", fontSize: '0.9rem'
-            }}
-          >
-            Register
-          </button>
+          />
         </div>
 
-        <form onSubmit={handleSubmit}>
-          {error && (
-            <div style={{
-              background: 'rgba(139, 58, 58, 0.15)',
-              border: '2px solid rgba(139, 58, 58, 0.3)',
-              borderRadius: '6px', padding: '0.75rem 1rem',
-              color: '#f4a4a4', fontSize: '0.85rem', marginBottom: '1rem'
-            }}>
-              {error}
+        {/* Character name tag */}
+        <div style={{
+          position: 'absolute', top: '2rem', left: '50%', transform: 'translateX(-50%)',
+          background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(10px)',
+          border: `1px solid ${mode === 'login' ? 'rgba(244,114,182,0.3)' : 'rgba(56,189,248,0.3)'}`,
+          borderRadius: 12, padding: '0.5rem 1.2rem', textAlign: 'center', whiteSpace: 'nowrap',
+        }}>
+          <div style={{ fontFamily: 'Cinzel, serif', fontWeight: 800, color: '#fff', fontSize: '0.95rem' }}>{charName}</div>
+          <div style={{ color: mode === 'login' ? '#f472b6' : '#38bdf8', fontSize: '0.72rem', marginTop: 2 }}>
+            {mode === 'login' ? 'Arch-Wizard · Explosion Magic' : 'Water Goddess · Arch-Priest'}
+          </div>
+        </div>
+
+        {/* Quote */}
+        <div style={{
+          position: 'absolute', bottom: '2rem', left: '1.5rem', right: '1.5rem',
+          background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(12px)',
+          border: '1px solid rgba(255,255,255,0.07)', borderRadius: 12, padding: '0.9rem 1rem',
+        }}>
+          <p style={{ color: 'rgba(255,255,255,0.75)', fontSize: '0.8rem', lineHeight: 1.65, fontStyle: 'italic', margin: 0 }}>
+            {mode === 'login'
+              ? '"Explosion! An incomparable, ultimate magic. Today, once again, I shall use it!" — Megumin'
+              : '"What?! You dare question a goddess?! Aqua-sama is here to bless your WhatsApp!" — Aqua'}
+          </p>
+        </div>
+      </div>
+
+      <style>{`
+        @media (min-width: 900px) {
+          .auth-character-panel { display: flex !important; flex-direction: column; }
+          .auth-card { margin: auto; }
+        }
+        @keyframes auth-float {
+          0%, 100% { transform: translateY(0); }
+          50%       { transform: translateY(-14px); }
+        }
+      `}</style>
+
+      {/* ── Auth card ────────────────────────────────────────────────── */}
+      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem', position: 'relative', zIndex: 1 }}>
+        <div className="auth-card glass-card" style={{ width: '100%', maxWidth: 420 }}>
+          <Link to="/" className="auth-logo">⚔ KONOSUBA</Link>
+          <p className="auth-subtitle">
+            {mode === 'login' ? 'Welcome back, Adventurer' : 'Begin your adventure'}
+          </p>
+
+          {/* Small character avatar above tabs */}
+          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '1rem' }}>
+            <div style={{ width: 54, height: 54, borderRadius: '50%', overflow: 'hidden', border: `2px solid ${mode === 'login' ? 'rgba(244,114,182,0.4)' : 'rgba(56,189,248,0.4)'}`, background: 'rgba(0,0,20,0.6)' }}>
+              <SmallCharImg src={charImg} alt={charName} />
             </div>
-          )}
+          </div>
 
-          {mode === 'register' && (
+          <div className="auth-tabs">
+            <button className={`auth-tab${mode === 'login' ? ' active' : ''}`} onClick={() => { setMode('login'); setError(''); setPassword(''); }}>
+              Login
+            </button>
+            <button className={`auth-tab${mode === 'register' ? ' active' : ''}`} onClick={() => { setMode('register'); setError(''); setPassword(''); }}>
+              Register
+            </button>
+          </div>
+
+          <form onSubmit={handleSubmit}>
+            {mode === 'register' && (
+              <div className="form-group">
+                <label className="form-label">Display Name (optional)</label>
+                <input className="form-input" type="text" placeholder="Your name" value={name} onChange={e => setName(e.target.value)} />
+              </div>
+            )}
             <div className="form-group">
-              <label className="form-label">Adventurer Name</label>
-              <input
-                type="text"
-                value={username}
-                onChange={e => setUsername(e.target.value)}
-                className="form-input"
-                placeholder="Your guild name"
-                required
-                style={{
-                  width: '100%', padding: '0.85rem 1rem',
-                  background: 'rgba(29, 20, 16, 0.6)',
-                  border: '2px solid rgba(212, 175, 55, 0.2)', borderRadius: '6px',
-                  color: '#fff', fontFamily: "'Poppins', sans-serif", outline: 'none', transition: 'all 0.2s'
-                }}
-              />
+              <label className="form-label">Phone Number</label>
+              <input className="form-input" type="tel" placeholder="e.g. 2348012345678 (with country code)" value={phone} onChange={e => setPhone(e.target.value)} required />
             </div>
-          )}
+            <div className="form-group">
+              <label className="form-label">Password</label>
+              <input className="form-input" type="password" placeholder="Enter your password" value={password} onChange={e => setPassword(e.target.value)} required />
+            </div>
 
-          <div className="form-group">
-            <label className="form-label">Email Address</label>
-            <input
-              type="email"
-              value={email}
-              onChange={e => setEmail(e.target.value)}
-              className="form-input"
-              placeholder="your@email.com"
-              required
-              style={{
-                width: '100%', padding: '0.85rem 1rem',
-                background: 'rgba(29, 20, 16, 0.6)',
-                border: '2px solid rgba(212, 175, 55, 0.2)', borderRadius: '6px',
-                color: '#fff', fontFamily: "'Poppins', sans-serif", outline: 'none', transition: 'all 0.2s'
-              }}
-            />
+            {error && <div className="auth-error">⚠ {error}</div>}
+
+            <button className="glow-btn form-submit" type="submit" disabled={loading}>
+              {loading ? '⏳ Processing...' : mode === 'login' ? '⚔ Login to Dashboard' : '✦ Create Account'}
+            </button>
+          </form>
+
+          <div className="auth-back">
+            <Link to="/">← Back to Home</Link>
           </div>
 
-          <div className="form-group">
-            <label className="form-label">Password</label>
-            <input
-              type="password"
-              value={password}
-              onChange={e => setPassword(e.target.value)}
-              className="form-input"
-              placeholder="••••••••"
-              required
-              style={{
-                width: '100%', padding: '0.85rem 1rem',
-                background: 'rgba(29, 20, 16, 0.6)',
-                border: '2px solid rgba(212, 175, 55, 0.2)', borderRadius: '6px',
-                color: '#fff', fontFamily: "'Poppins', sans-serif", outline: 'none', transition: 'all 0.2s'
-              }}
-            />
+          <div style={{ marginTop: '1.5rem', padding: '1rem', background: 'rgba(0,212,255,0.04)', border: '1px solid rgba(0,212,255,0.1)', borderRadius: 10, fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: 1.6 }}>
+            <strong style={{ color: 'rgba(0,212,255,0.8)' }}>Note:</strong> Use the same phone number you use with the WhatsApp bot. Include country code without the + sign.
           </div>
-
-          <button
-            type="submit"
-            disabled={loading}
-            className="glow-btn"
-            style={{
-              width: '100%', padding: '0.9rem', marginTop: '0.5rem',
-              fontSize: '1rem', fontWeight: 700, cursor: loading ? 'not-allowed' : 'pointer',
-              opacity: loading ? 0.7 : 1
-            }}
-          >
-            {loading ? (mode === 'login' ? 'Logging in...' : 'Creating account...') : (mode === 'login' ? 'Login to Guild' : 'Join Guild')}
-          </button>
-        </form>
-
-        <div className="auth-back">
-          <p style={{ marginBottom: '1rem' }}>
-            {mode === 'login' ? "Don't have an account? " : 'Already a member? '}
-            <a
-              href="#"
-              onClick={e => {
-                e.preventDefault();
-                setMode(mode === 'login' ? 'register' : 'login');
-                setError('');
-              }}
-              style={{ color: 'var(--gold)', textDecoration: 'none', fontWeight: 700, transition: 'color 0.2s' }}
-            >
-              {mode === 'login' ? 'Create one' : 'Login here'}
-            </a>
-          </p>
-          <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: 1.5 }}>
-            By joining, you agree to our Terms of Service and Privacy Policy
-          </p>
         </div>
       </div>
     </div>
