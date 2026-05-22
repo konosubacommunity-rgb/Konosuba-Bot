@@ -190,7 +190,17 @@ export default function Manager() {
           <div style={{ position: 'relative', width: 96, height: 96, margin: '0 auto 1rem' }}>
             <div style={{ position: 'absolute', inset: 0, borderRadius: '50%', background: 'radial-gradient(circle, rgba(0,212,255,0.2), transparent)', animation: 'ping 2s ease-in-out infinite' }} />
             <div style={{ width: 96, height: 96, borderRadius: '50%', overflow: 'hidden', border: '2px solid rgba(0,212,255,0.4)', background: 'rgba(0,0,20,0.8)', boxShadow: '0 0 30px rgba(0,212,255,0.25)' }}>
-              <img src="https://static.wikia.nocookie.net/konosuba/images/4/4f/Kazuma_Anime.png/revision/latest?width=200" alt="Kazuma" style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'top center' }} />
+              <img
+                src="https://static.wikia.nocookie.net/konosuba/images/4/4f/Kazuma_Anime.png/revision/latest?width=200"
+                alt="Kazuma"
+                style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'top center' }}
+                onError={(e) => {
+                  const img = e.currentTarget;
+                  img.style.display = 'none';
+                  const parent = img.parentElement;
+                  if (parent) { parent.style.fontSize = '2.5rem'; parent.style.display = 'flex'; parent.style.alignItems = 'center'; parent.style.justifyContent = 'center'; parent.textContent = '⚔'; }
+                }}
+              />
             </div>
           </div>
           <h1 className="login-title">Bot Manager</h1>
@@ -402,13 +412,15 @@ export default function Manager() {
       {/* SIDEBAR */}
       <aside className={`sidebar${collapsed ? ' collapsed' : ''}`}>
         <a href="/" className="sidebar-brand">
-          {collapsed ? '⚔' : '⚔ KONOSUBA'}
+          <div className="sidebar-logo">⚔</div>
+          <span>KONOSUBA</span>
         </a>
         <nav className="sidebar-nav">
+          {!collapsed && <div className="sidebar-section-title">Navigation</div>}
           {NAV.map(n => (
-            <button key={n.id} className={`nav-item${tab === n.id ? ' active' : ''}`} onClick={() => setTab(n.id)}>
-              <span className="nav-icon">{n.icon}</span>
-              {!collapsed && <span className="nav-label">{n.label}</span>}
+            <button key={n.id} className={`sidebar-item${tab === n.id ? ' active' : ''}`} onClick={() => setTab(n.id)}>
+              <span className="sidebar-icon">{n.icon}</span>
+              <span className="sidebar-label">{n.label}</span>
             </button>
           ))}
         </nav>
